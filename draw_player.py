@@ -16,6 +16,22 @@ C_BLACK  = (  0,  0,   0)
 C_WHITE  = (255, 255, 255)
 C_PUPIL  = ( 34, 34,  153)   # #222299  deep blue pupils
 
+# ── Gameplay color boost ───────────────────────────────────────────────────────
+# CRT scanlines + vignette + chromatic aberration darken colors. Pre-brighten.
+_COLOR_BOOST: dict[tuple, tuple] = {
+    (255,  51,  51): (255,  34,  34),   # Blinky → saturated red
+    (255, 130, 190): (255, 110, 180),   # Pinky  → punchier pink
+    (  0, 207, 207): (  0, 234, 234),   # Inky   → vivid cyan
+    (255, 184,  71): (255, 170,   0),   # Clyde  → full orange
+}
+
+
+def _gameplay_color(color: tuple) -> tuple:
+    """Return a CRT-compensated version of the ghost body color."""
+    if color in _COLOR_BOOST:
+        return _COLOR_BOOST[color]
+    return tuple(min(255, c + 25) for c in color)  # type: ignore[return-value]
+
 # ── Base ghost dimensions (pixels) ────────────────────────────────────────────
 _DOME_R = 14    # dome radius  = half body width (total width = 28px)
 _BODY_H = 14    # rectangular body height below dome flat edge
@@ -234,6 +250,7 @@ def draw_fancy_player(surf: pygame.Surface,
     land_squash  = getattr(player, 'land_squash',  0)
     pos_history  = getattr(player, 'pos_history',  [])
     player_color = getattr(player, 'color',        C_BODY)
+    bright_color = _gameplay_color(player_color)
     t_ms         = pygame.time.get_ticks()
     scared       = (s == "roll")
 
@@ -262,7 +279,8 @@ def draw_fancy_player(surf: pygame.Surface,
     # Tentacle animation phase — toggles every 2 anim-frames
     anim = (fr // 2) % 2
 
-    body_col = C_SCARED if scared else player_color
+    body_col = C_SCARED if scared else bright_color
+    glow_col = C_SCARED if scared else bright_color
 
     # ── 1. Shadow ─────────────────────────────────────────────────────────
     sh_w = 24 + (int(land_squash * 2) if land_squash > 0 else 0)
@@ -285,15 +303,22 @@ def draw_fancy_player(surf: pygame.Surface,
         t_surf = pygame.Surface((_TRAIL_SURF_W, _TRAIL_SURF_H), pygame.SRCALPHA)
         t_pts  = _ghost_pts(t_half, t_top_pad,
                             tr_dome_r, tr_body_h, tr_bump_h, anim)
-        pygame.draw.polygon(t_surf, (*player_color, alpha), t_pts)
+        pygame.draw.polygon(t_surf, (*bright_color, alpha), t_pts)
         surf.blit(t_surf, (rx - t_half, ry_dome - t_top_pad))
 
-    # ── 3. Ghost body ─────────────────────────────────────────────────────
+    # ── 3. Neon glow (inflated ghost shape, same hue, alpha 40) ───────────
+    # Fixed 64×72 SRCALPHA surface; dome centre at local (32, 24)
+    glow_surf = pygame.Surface((64, 72), pygame.SRCALPHA)
+    glow_pts  = _ghost_pts(32, 24, dome_r + 4, body_h + 4, bump_h + 4, anim)
+    pygame.draw.polygon(glow_surf, (*glow_col, 40), glow_pts)
+    surf.blit(glow_surf, (cx - 32, dome_cy - 24))
+
+    # ── 4. Ghost body ─────────────────────────────────────────────────────
     pts = _ghost_pts(cx, dome_cy, dome_r, body_h, bump_h, anim)
     pygame.draw.polygon(surf, body_col, pts)
     pygame.draw.polygon(surf, C_BLACK,  pts, 2)
 
-    # ── 4. Eyes / scared face ─────────────────────────────────────────────
+    # ── 5. Eyes / scared face ─────────────────────────────────────────────
     if scared:
         _draw_scared_face(surf, cx, dome_cy, dome_r)
     else:

@@ -84,6 +84,28 @@ LEVEL = [
     "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
 ]
 
+# ── Coin positions (pixel x, pixel y — placed above platform surfaces) ────────
+_T = TILE
+COIN_POSITIONS: list[tuple[float, float]] = [
+    # Arc above left ground (row 10, cols 1-5)
+    ( 1*_T+16, 10*_T-50), ( 2*_T+16, 10*_T-70), ( 3*_T+16, 10*_T-85),
+    ( 4*_T+16, 10*_T-70), ( 5*_T+16, 10*_T-50),
+    # Mid-air gap reward (between row-10 ground sections, requires jump)
+    (12*_T+16,  9*_T+10), (14*_T+16,  8*_T+16), (16*_T+16,  9*_T+10),
+    # Above second ground cluster (row 10, cols 17-20)
+    (17*_T+16, 10*_T-45), (18*_T+16, 10*_T-65), (20*_T+16, 10*_T-45),
+    # Above third ground cluster (row 10, cols 25-28)
+    (25*_T+16, 10*_T-45), (26*_T+16, 10*_T-65), (28*_T+16, 10*_T-45),
+    # Elevated — above row-12 raised section (cols 9-12)
+    ( 9*_T+16, 12*_T-45), (10*_T+16, 12*_T-65), (12*_T+16, 12*_T-45),
+    # Above row-14 left ground (cols 2-8)
+    ( 2*_T+16, 14*_T-45), ( 5*_T+16, 14*_T-70), ( 8*_T+16, 14*_T-45),
+    # Above mid-level ground (row 10, cols 37-41)
+    (37*_T+16, 10*_T-45), (39*_T+16, 10*_T-65), (41*_T+16, 10*_T-45),
+    # High-risk: above pass-through platforms (rows 7-8, requires skillful jump)
+    (18*_T+16,  7*_T-30), (28*_T+16,  8*_T-30),
+]
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
@@ -225,6 +247,21 @@ class ParticleSystem:
             tmp.fill((*col, alpha))
             surf.blit(tmp, (rx - sz // 2, ry - sz // 2))
 
+    def spawn_coin_collect(self, px: float, py: float) -> None:
+        """Burst of 6 gold particles on coin pickup."""
+        for i in range(6):
+            angle = i * math.tau / 6
+            speed = random.uniform(2.0, 4.0)
+            life  = random.randint(15, 25)
+            self.particles.append({
+                "x": px, "y": py,
+                "vx": math.cos(angle) * speed,
+                "vy": math.sin(angle) * speed - 1.0,
+                "life": life, "max_life": life,
+                "color": (255, 215, 0),
+                "size": random.choice([3, 3, 4]),
+            })
+
 
 # ── Camera ────────────────────────────────────────────────────────────────────
 class Camera:
@@ -266,6 +303,61 @@ class Camera:
     @property
     def cy(self) -> int:
         return int(self.y) + self.offset_y
+
+
+# ── Coin ──────────────────────────────────────────────────────────────────────
+class Coin:
+    """Collectible coin: gold circle with bob + spin animation."""
+
+    RADIUS    = 6
+    _COL_GOLD  = (255, 215,   0)
+    _COL_SHINE = (255, 240, 160)
+
+    def __init__(self, x: float, y: float) -> None:
+        self.x          = x
+        self.y          = y
+        self.collected  = False
+        self.bob_offset = random.uniform(0, math.tau)
+        self.spin_phase = random.uniform(0, math.tau)
+
+    def update(self, player: "Player", particles: ParticleSystem) -> int:
+        """Check collection. Returns 100 if just collected this frame, else 0."""
+        if self.collected:
+            return 0
+        dx = abs((player.x + player.W / 2) - self.x)
+        dy = abs((player.y + player.H / 2) - self.y)
+        if dx < 10 and dy < 10:
+            self.collected = True
+            particles.spawn_coin_collect(self.x, self.y)
+            return 100
+        return 0
+
+    def draw(self, surf: pygame.Surface, cam_x: int, cam_y: int,
+             t_ms: int) -> None:
+        if self.collected:
+            return
+        rx = int(self.x) - cam_x
+        ry = int(self.y) - cam_y
+        if rx < -20 or rx > WIDTH + 20:
+            return
+
+        r  = self.RADIUS
+        by = ry + int(math.sin(t_ms * 0.003 + self.bob_offset) * 4)
+
+        # Gold fill
+        pygame.draw.circle(surf, self._COL_GOLD, (rx, by), r)
+
+        # Spin overlay: horizontal ellipse cycling width 0→full→0
+        spin_w = int(abs(math.sin(t_ms * math.pi / 500.0 + self.spin_phase)) * r * 2)
+        if spin_w > 1:
+            pygame.draw.ellipse(surf, self._COL_SHINE,
+                                (rx - spin_w // 2, by - r // 2, spin_w, r))
+
+        # Black outline
+        pygame.draw.circle(surf, (0, 0, 0), (rx, by), r, 2)
+
+        # Shine dot (top-left)
+        pygame.draw.circle(surf, self._COL_SHINE, (rx - 2, by - 2), 3)
 
 
 # ── Parallax background ───────────────────────────────────────────────────────
@@ -433,9 +525,16 @@ class CRTOverlay:
 # ── HUD ───────────────────────────────────────────────────────────────────────
 def draw_hud(surf: pygame.Surface, player: "Player",
              font_sm: pygame.font.Font, font_title: pygame.font.Font,
-             frame: int) -> None:
-    """Arcade-style HUD: title, speed bar, state icon."""
-    # Title
+             frame: int, score: int = 0,
+             coins_collected: int = 0, total_coins: int = 0) -> None:
+    """Arcade-style HUD: score top-left, title centre, speed bar top-right."""
+    # Score (top-left)
+    surf.blit(font_sm.render("SCORE", True, COL_HUD_LABEL),  (12,  8))
+    surf.blit(font_sm.render(str(score), True, COL_HUD_VALUE), (12, 22))
+    surf.blit(font_sm.render(f"coins: {coins_collected} / {total_coins}",
+                             True, (136, 136, 136)), (12, 36))
+
+    # Title (centre)
     title = "RETRO PANTS"
     shadow = font_title.render(title, True, COL_TITLE_SHADOW)
     text   = font_title.render(title, True, COL_HUD_VALUE)
@@ -835,6 +934,7 @@ def main() -> None:
 
     font_sm    = pygame.font.SysFont("monospace", 12)
     font_title = pygame.font.SysFont("monospace", 16, bold=True)
+    font_float = pygame.font.SysFont("monospace", 14, bold=True)
 
     player_color = run_character_select(screen, clock)
 
@@ -844,10 +944,13 @@ def main() -> None:
     camera     = Camera()
     parallax   = ParallaxBackground()
     crt        = CRTOverlay()
+    coins      = [Coin(x, y) for x, y in COIN_POSITIONS]
 
     # Offscreen surface so CRT can composite on it
-    game_surf  = pygame.Surface((WIDTH, HEIGHT))
-    frame      = 0
+    game_surf   = pygame.Surface((WIDTH, HEIGHT))
+    score       = 0
+    float_texts: list[dict] = []
+    frame       = 0
 
     while True:
         for event in pygame.event.get():
@@ -858,20 +961,53 @@ def main() -> None:
 
         keys = pygame.key.get_pressed()
         player.update(keys, tiles, particles, camera)
+
+        # Coin collection
+        for coin in coins:
+            gained = coin.update(player, particles)
+            if gained:
+                score += gained
+                float_texts.append({
+                    "x": coin.x, "y": coin.y - 10,
+                    "alpha": 255.0, "dy": -0.75,
+                })
+
+        # Floating score text decay
+        next_ft = []
+        for ft in float_texts:
+            ft["y"]    += ft["dy"]
+            ft["alpha"] = max(0.0, ft["alpha"] - 255.0 / 40)
+            if ft["alpha"] > 0:
+                next_ft.append(ft)
+        float_texts = next_ft
+
         particles.update()
         camera.update(player.x)
         parallax.update()
 
         cx, cy = camera.cx, camera.cy
+        t_ms   = pygame.time.get_ticks()
 
         # ── Draw to game_surf ────────────────────────────────────────
         game_surf.fill(COL_BG)
         draw_stars(game_surf, cx, frame)
         parallax.draw(game_surf, cx)
         draw_tiles(game_surf, tiles, cx, cy)
+        for coin in coins:
+            coin.draw(game_surf, cx, cy, t_ms)
         particles.draw(game_surf, cx, cy)
         player.draw(game_surf, cx)
-        draw_hud(game_surf, player, font_sm, font_title, frame)
+
+        # Floating +100 texts
+        for ft in float_texts:
+            ftxt = font_float.render("+100", True, (255, 215, 0))
+            ftxt.set_alpha(int(ft["alpha"]))
+            game_surf.blit(ftxt, (int(ft["x"]) - cx - ftxt.get_width() // 2,
+                                  int(ft["y"]) - cy))
+
+        coins_col = sum(1 for c in coins if c.collected)
+        draw_hud(game_surf, player, font_sm, font_title, frame,
+                 score, coins_col, len(coins))
 
         # ── Composite to screen with CRT ─────────────────────────────
         screen.blit(game_surf, (0, 0))
