@@ -62,48 +62,69 @@ SHAKE_MAGNITUDE      = 5
 # ── Scarf trail length ────────────────────────────────────────────────────────
 SCARF_HISTORY = 5
 
-# ── Level map (80+ columns) ───────────────────────────────────────────────────
+# ── Level map (100 columns, 6 sections) ──────────────────────────────────────
 # 0=air  G=solid ground  P=pass-through platform
+# Section 1 (cols 0-32):  warmup — solid ground, gentle hops
+# Section 2 (cols 33-40): speed corridor + 4-tile gap (cols 33-36)
+# Section 3 (cols 41-54): ascending platform chain — no floor, 3 P steps
+# Section 4 (cols 55-63): 7-tile big gap (cols 57-63) + P safety net at row 12
+# Section 5 (cols 64-84): rhythm gaps — 3 small pits with landings
+# Section 6 (cols 85-99): victory stretch — open solid run
+_g = "G" * 33 + " " * 4 + "G" * 4 + " " * 14 + "G" * 2 + " " * 7 + "G" * 6 + " " * 3 + "G" * 3 + " " * 3 + "G" * 3 + " " * 3 + "G" * 15
 LEVEL = [
-    "                                                                                ",
-    "                                                                                ",
-    "                                                                                ",
-    "                                            P                                  ",
-    "                                       P         P                             ",
-    "                  P                                    P    P                  ",
-    "             P         P                    P                        P         ",
-    "                  P              P                P                       P    ",
-    "    P                       P                          P                       ",
-    "                                                                                ",
-    "GGGGGGGGG        GGGG    GGGG        GGGGG    GGG   GGGGG        GGGGGGG       ",
-    "                                                                                ",
-    "         GGGG                GGGG                         GGGG                 ",
-    "                  P                    P        P                    P         ",
-    "GGGGGGGGGGGGGG         GGGG      GGGGGGGGG           GGGGGGGGGGG          GGGG ",
-    "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
-    "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
+    " " * 100,                                                                    # 0  sky
+    " " * 100,                                                                    # 1
+    " " * 100,                                                                    # 2
+    " " * 52 + "P" + " " * 47,                                                   # 3  scattered decorative platforms
+    " " * 20 + "P" + " " * 44 + "P" + " " * 34,                                 # 4
+    " " * 35 + "P" + " " * 36 + "P" + " " * 27,                                 # 5
+    " " * 15 + "P" + " " * 34 + "P" + " " * 49,                                 # 6
+    " " * 62 + "P" + " " * 17 + "P" + " " * 19,                                 # 7
+    " " * 27 + "PPP" + " " * 70,                                                 # 8
+    " " * 8  + "PPP" + " " * 79 + "PPP" + " " * 7,                              # 9  high hops s1 + s6
+    " " * 4  + "PPP" + " " * 15 + "PPP" + " " * 75,                             # 10 s1 low hops
+    " " * 10 + "PPP" + " " * 38 + "PPP" + " " * 46,                             # 11 s1 high + s3 top step
+    " " * 46 + "PPP" + " " * 10 + "PPP" + " " * 9  + "PPP" + " " * 26,         # 12 s3 mid + s4 safety net + s5 optional
+    " " * 7  + "PPP" + " " * 8  + "PPP" + " " * 21 + "PPP" + " " * 55,         # 13 s1 near-floor + s3 bottom step
+    _g,                                                                           # 14 main ground with gaps
+    _g,                                                                           # 15
+    _g,                                                                           # 16
 ]
 
-# ── Coin positions (pixel x, pixel y — placed above platform surfaces) ────────
+# ── Coin positions (pixel x, pixel y) aligned to new 100-col level ────────────
 _T = TILE
 COIN_POSITIONS: list[tuple[float, float]] = [
-    # Arc above left ground (row 10, cols 1-5)
-    ( 1*_T+16, 10*_T-50), ( 2*_T+16, 10*_T-70), ( 3*_T+16, 10*_T-85),
-    ( 4*_T+16, 10*_T-70), ( 5*_T+16, 10*_T-50),
-    # Mid-air gap reward (between row-10 ground sections, requires jump)
-    (12*_T+16,  9*_T+10), (14*_T+16,  8*_T+16), (16*_T+16,  9*_T+10),
-    # Above second ground cluster (row 10, cols 17-20)
-    (17*_T+16, 10*_T-45), (18*_T+16, 10*_T-65), (20*_T+16, 10*_T-45),
-    # Above third ground cluster (row 10, cols 25-28)
-    (25*_T+16, 10*_T-45), (26*_T+16, 10*_T-65), (28*_T+16, 10*_T-45),
-    # Elevated — above row-12 raised section (cols 9-12)
-    ( 9*_T+16, 12*_T-45), (10*_T+16, 12*_T-65), (12*_T+16, 12*_T-45),
-    # Above row-14 left ground (cols 2-8)
-    ( 2*_T+16, 14*_T-45), ( 5*_T+16, 14*_T-70), ( 8*_T+16, 14*_T-45),
-    # Above mid-level ground (row 10, cols 37-41)
-    (37*_T+16, 10*_T-45), (39*_T+16, 10*_T-65), (41*_T+16, 10*_T-45),
-    # High-risk: above pass-through platforms (rows 7-8, requires skillful jump)
-    (18*_T+16,  7*_T-30), (28*_T+16,  8*_T-30),
+    # Section 1 — warmup ground run (6 coins)
+    ( 1*_T+16, 14*_T-30),  # early ground
+    ( 8*_T+16, 13*_T-25),  # above row-13 platform at col 8
+    (14*_T+16, 14*_T-30),  # mid section 1
+    (19*_T+16, 13*_T-25),  # above row-13 platform at col 19
+    (25*_T+16, 14*_T-30),  # late section 1
+    ( 9*_T+16,  9*_T-30),  # high reward above row-9 platform (col 9)
+    # Section 2 — floating over 4-tile gap (2 coins)
+    (33*_T+16, 14*_T-58),  # edge of gap
+    (35*_T+16, 14*_T-93),  # mid-air peak (requires arc jump)
+    # Section 3 — ascending platform chain (3 coins)
+    (43*_T+16, 13*_T-25),  # above step 1 (row 13)
+    (47*_T+16, 12*_T-25),  # above step 2 (row 12)
+    (52*_T+16, 11*_T-25),  # above step 3 (row 11) — highest
+    # Section 4 — big gap + safety net (2 coins)
+    (59*_T+16, 14*_T-58),  # floating in gap
+    (60*_T+16, 12*_T-25),  # above safety-net platform
+    # Section 5 — rhythm gaps (6 coins)
+    (71*_T+16, 14*_T-58),  # over gap 1
+    (72*_T+16, 12*_T-25),  # above optional platform (row 12)
+    (74*_T+16, 14*_T-30),  # landing after gap 1
+    (77*_T+16, 14*_T-58),  # over gap 2
+    (80*_T+16, 14*_T-30),  # landing after gap 2
+    (83*_T+16, 14*_T-58),  # over gap 3
+    # Section 6 — victory stretch (6 coins)
+    (87*_T+16, 14*_T-30),
+    (89*_T+16, 14*_T-30),
+    (91*_T+16, 14*_T-30),
+    (93*_T+16, 14*_T-30),
+    (95*_T+16, 14*_T-30),
+    (97*_T+16, 14*_T-30),
 ]
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -274,6 +295,7 @@ class Camera:
         self._shake_mag: float = 0.0
         self.offset_x: int = 0
         self.offset_y: int = 0
+        self.flash_timer: int = 0
 
     def trigger_shake(self, magnitude: float = SHAKE_MAGNITUDE,
                       frames: int = SHAKE_FRAMES) -> None:
@@ -285,6 +307,9 @@ class Camera:
         self.x += (target - self.x) * 0.12
         self.x = max(0.0, self.x)
         self.y = 0.0
+
+        if self.flash_timer > 0:
+            self.flash_timer -= 1
 
         if self._shake_frames > 0:
             decay = self._shake_frames / SHAKE_FRAMES
@@ -358,6 +383,118 @@ class Coin:
 
         # Shine dot (top-left)
         pygame.draw.circle(surf, self._COL_SHINE, (rx - 2, by - 2), 3)
+
+
+# ── Enemy ─────────────────────────────────────────────────────────────────────
+class Enemy:
+    """Patrolling spiky blob. Stomp from above for 200 pts; side contact respawns player."""
+
+    RADIUS    = 10
+    SPEED     = 1.5
+    _COL_BODY = (180,  30,  30)
+    _COL_DARK = ( 80,   0,   0)
+    _COL_EYE  = (255, 255, 255)
+
+    def __init__(self, x: float, y: float,
+                 patrol_x1: float, patrol_x2: float) -> None:
+        self.x         = x
+        self.y         = y
+        self.vx        = self.SPEED
+        self.vy        = 0.0
+        self.patrol_x1 = patrol_x1
+        self.patrol_x2 = patrol_x2
+        self.alive     = True
+        self.facing    = 1
+
+    @property
+    def rect(self) -> pygame.Rect:
+        r = self.RADIUS
+        return pygame.Rect(int(self.x) - r, int(self.y) - r, r * 2, r * 2)
+
+    def update(self, tiles: list) -> None:
+        """Patrol + gravity + solid tile collision."""
+        if not self.alive:
+            return
+        # Horizontal patrol
+        self.x += self.vx
+        if self.x <= self.patrol_x1:
+            self.x = self.patrol_x1; self.vx = self.SPEED;  self.facing =  1
+        elif self.x >= self.patrol_x2:
+            self.x = self.patrol_x2; self.vx = -self.SPEED; self.facing = -1
+        # Gravity
+        self.vy = min(self.vy + GRAVITY, MAX_FALL)
+        self.y += self.vy
+        # Solid tile collision (vertical only — patrol keeps horizontal in bounds)
+        r = self.rect
+        for tile, solid in tiles:
+            if solid and r.colliderect(tile):
+                if self.vy >= 0:
+                    self.y  = tile.top - self.RADIUS
+                    self.vy = 0
+                else:
+                    self.y  = tile.bottom + self.RADIUS
+                    self.vy = 0
+                r = self.rect
+
+    def check_player(self, player: "Player", particles: "ParticleSystem",
+                     camera: "Camera", float_texts: list) -> int:
+        """
+        Collision with player. Returns score gained (200 for stomp, 0 otherwise).
+        Mutates player.vy on stomp; respawns player + sets camera.flash_timer on hurt.
+        """
+        if not self.alive:
+            return 0
+        if not player.rect.colliderect(self.rect):
+            return 0
+        # Stomp: player falling, feet at or above enemy centre
+        stomping = (
+            player.vy > 2
+            and player.rect.bottom <= self.y + self.RADIUS * 0.6
+        )
+        if stomping:
+            self.alive = False
+            player.vy  = -10.0
+            particles.spawn_impact(self.x, self.y)
+            float_texts.append({
+                "x": self.x, "y": self.y - 20,
+                "alpha": 255.0, "dy": -0.75, "text": "+200",
+            })
+            return 200
+        # Side / under hit → respawn
+        player.x, player.y   = 80.0, 100.0
+        player.vx, player.vy = 0.0,  0.0
+        camera.flash_timer    = 20
+        return 0
+
+    def draw(self, surf: pygame.Surface, cam_x: int, cam_y: int) -> None:
+        if not self.alive:
+            return
+        rx = int(self.x) - cam_x
+        ry = int(self.y) - cam_y
+        if rx < -40 or rx > WIDTH + 40:
+            return
+        r = self.RADIUS
+        # 8 spikes
+        spike_len = r + 6
+        for i in range(8):
+            ang = i * math.pi / 4
+            tip  = (int(rx + math.cos(ang) * spike_len),
+                    int(ry + math.sin(ang) * spike_len))
+            bl   = (int(rx + math.cos(ang - 0.3) * r),
+                    int(ry + math.sin(ang - 0.3) * r))
+            br   = (int(rx + math.cos(ang + 0.3) * r),
+                    int(ry + math.sin(ang + 0.3) * r))
+            pygame.draw.polygon(surf, self._COL_DARK, [tip, bl, br])
+        # Body
+        pygame.draw.circle(surf, self._COL_BODY, (rx, ry), r)
+        pygame.draw.circle(surf, self._COL_DARK,  (rx, ry), r, 2)
+        # Angry eyes
+        for ex_off in (-4, 4):
+            pygame.draw.circle(surf, self._COL_EYE, (rx + ex_off, ry - 2), 3)
+            pygame.draw.circle(surf, (0, 0, 0),      (rx + ex_off, ry - 1), 1)
+        # Angry brows (inner-corner raised = angry)
+        pygame.draw.line(surf, self._COL_DARK, (rx - 7, ry - 6), (rx - 2, ry - 4), 2)
+        pygame.draw.line(surf, self._COL_DARK, (rx + 2, ry - 4), (rx + 7, ry - 6), 2)
 
 
 # ── Parallax background ───────────────────────────────────────────────────────
@@ -946,6 +1083,18 @@ def main() -> None:
     crt        = CRTOverlay()
     coins      = [Coin(x, y) for x, y in COIN_POSITIONS]
 
+    # 6 enemies: (spawn_x, spawn_y, patrol_x1, patrol_x2)
+    # Ground surface = row 14 top = 14*TILE = 448; enemy centre at 448 - ENEMY_R = 438
+    _ER = Enemy.RADIUS
+    enemies: list[Enemy] = [
+        Enemy( 3*TILE+16, 14*TILE-_ER,  2*TILE+16,  8*TILE+16),  # s1 early
+        Enemy(16*TILE+16, 14*TILE-_ER, 14*TILE+16, 20*TILE+16),  # s1 mid
+        Enemy(39*TILE+16, 14*TILE-_ER, 38*TILE+16, 41*TILE+16),  # after s2 gap
+        Enemy(47*TILE+16, 12*TILE-_ER, 46*TILE+16, 48*TILE+16),  # s3 step-2 platform
+        Enemy(66*TILE+16, 14*TILE-_ER, 64*TILE+16, 69*TILE+16),  # after s4 gap
+        Enemy(91*TILE+16, 14*TILE-_ER, 88*TILE+16, 95*TILE+16),  # s6 victory
+    ]
+
     # Offscreen surface so CRT can composite on it
     game_surf   = pygame.Surface((WIDTH, HEIGHT))
     score       = 0
@@ -972,6 +1121,13 @@ def main() -> None:
                     "alpha": 255.0, "dy": -0.75,
                 })
 
+        # Enemy update + collision
+        for enemy in enemies:
+            enemy.update(tiles)
+            gained = enemy.check_player(player, particles, camera, float_texts)
+            if gained:
+                score += gained
+
         # Floating score text decay
         next_ft = []
         for ft in float_texts:
@@ -996,11 +1152,21 @@ def main() -> None:
         for coin in coins:
             coin.draw(game_surf, cx, cy, t_ms)
         particles.draw(game_surf, cx, cy)
+        for enemy in enemies:
+            enemy.draw(game_surf, cx, cy)
         player.draw(game_surf, cx)
 
-        # Floating +100 texts
+        # Red screen flash on player hurt
+        if camera.flash_timer > 0:
+            _flash = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            _flash.fill((255, 0, 0, int(120 * camera.flash_timer / 20)))
+            game_surf.blit(_flash, (0, 0))
+
+        # Floating score texts (+100 coin, +200 stomp)
         for ft in float_texts:
-            ftxt = font_float.render("+100", True, (255, 215, 0))
+            txt  = ft.get("text", "+100")
+            col  = (255, 100, 100) if txt == "+200" else (255, 215, 0)
+            ftxt = font_float.render(txt, True, col)
             ftxt.set_alpha(int(ft["alpha"]))
             game_surf.blit(ftxt, (int(ft["x"]) - cx - ftxt.get_width() // 2,
                                   int(ft["y"]) - cy))
