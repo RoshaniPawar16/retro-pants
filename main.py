@@ -12,20 +12,30 @@ FPS           = 60
 TILE          = 32
 
 # ── Palette ───────────────────────────────────────────────────────────────────
-COL_BG            = (13,  13,  13)
-COL_GROUND        = (26,  26,  46)
-COL_GROUND_EDGE   = (233, 69,  96)
-COL_PLATFORM      = (22,  33,  62)
-COL_PLATFORM_DARK = (15,  52,  96)
+COL_BG            = ( 13,   8,  32)   # #0D0820 — Sea of Stars deep sky
+COL_GROUND        = ( 27,  16,  64)   # kept for compat (now unused in drawing)
+COL_GROUND_EDGE   = (233,  69,  96)   # kept for compat
+COL_PLATFORM      = ( 45,  27, 105)   # kept for compat
+COL_PLATFORM_DARK = ( 27,  16,  64)   # kept for compat
 COL_BODY          = (240, 232, 210)   # warm cream
-COL_OUTLINE       = (10,  10,  10)
+COL_OUTLINE       = ( 10,  10,  10)
 COL_SCARF         = (255, 107, 107)   # #FF6B6B
 COL_STAR_W        = (255, 255, 255)
 COL_STAR_B        = (170, 170, 255)
 COL_STAR_R        = (255, 107, 107)
-COL_HUD_LABEL     = (233, 69,  96)
+COL_HUD_LABEL     = (233,  69,  96)
 COL_HUD_VALUE     = (255, 255, 255)
-COL_TITLE_SHADOW  = (233, 69,  96)
+COL_TITLE_SHADOW  = (233,  69,  96)
+
+# ── Sea of Stars tile palette ─────────────────────────────────────────────────
+COL_G_BASE = ( 27,  16,  64)   # #1B1040 deep indigo base
+COL_G_CAP  = ( 78, 205, 196)   # #4ECDC4 teal lit edge
+COL_G_MID  = ( 45,  27, 105)   # #2D1B69 second layer
+COL_G_DARK = ( 13,   8,  32)   # #0D0820 side shadow
+COL_G_BOT  = ( 10,   6,  24)   # #0A0618 bottom edge
+COL_P_CAP  = (255, 209, 102)   # #FFD166 amber platform highlight
+COL_P_MID  = ( 45,  27, 105)   # #2D1B69
+COL_P_BASE = ( 27,  16,  64)   # #1B1040
 
 # ── Ghost options (character select) ──────────────────────────────────────────
 GHOST_OPTIONS = [
@@ -182,28 +192,128 @@ def draw_stars(surf: pygame.Surface, cam_x: int, frame: int) -> None:
         pygame.draw.circle(surf, col, (rx, s["y"]), s["size"])
 
 
+# ── Tile surfaces (pre-rendered at startup, filled by _build_tile_surfaces) ───
+_TILE_G_CAP:   "pygame.Surface | None" = None  # 32×32 ground with teal top cap
+_TILE_G_FILL:  "pygame.Surface | None" = None  # 32×32 ground inner (no cap)
+_TILE_P_BASE:  "pygame.Surface | None" = None  # 32×10 platform base (no amber)
+_TILE_SHADOW4: "pygame.Surface | None" = None  # 32×4  SRCALPHA drop shadow
+_TILE_SHADOW3: "pygame.Surface | None" = None  # 32×3  SRCALPHA drop shadow
+_TILE_GLOW_G:  "pygame.Surface | None" = None  # 32×12 SRCALPHA ground bloom
+_TILE_GLOW_P:  "pygame.Surface | None" = None  # 36×14 SRCALPHA platform bloom
+
+
+def _build_tile_surfaces() -> None:
+    """Pre-render all tile face and glow surfaces. Call once after pygame.init()."""
+    global _TILE_G_CAP, _TILE_G_FILL, _TILE_P_BASE
+    global _TILE_SHADOW4, _TILE_SHADOW3, _TILE_GLOW_G, _TILE_GLOW_P
+
+    def _ground(cap: bool) -> pygame.Surface:
+        s = pygame.Surface((TILE, TILE))
+        s.fill(COL_G_BASE)
+        pygame.draw.rect(s, COL_G_DARK, (0,        0, 3,    TILE))   # left edge
+        pygame.draw.rect(s, COL_G_DARK, (TILE - 3, 0, 3,    TILE))   # right edge
+        pygame.draw.rect(s, COL_G_BOT,  (0,  TILE - 2, TILE, 2))     # bottom edge
+        if cap:
+            pygame.draw.rect(s, COL_G_CAP, (0, 0, TILE, 5))          # teal highlight
+            pygame.draw.rect(s, COL_G_MID, (0, 5, TILE, 4))          # mid purple
+        return s
+
+    _TILE_G_CAP  = _ground(True)
+    _TILE_G_FILL = _ground(False)
+
+    # Platform base: mid purple + dark base, amber cap drawn per-frame for pulse
+    _TILE_P_BASE = pygame.Surface((TILE, 10))
+    _TILE_P_BASE.fill(COL_P_MID)
+    pygame.draw.rect(_TILE_P_BASE, COL_P_BASE, (0, 7, TILE, 3))
+
+    # SRCALPHA drop shadows (blit below tile)
+    _TILE_SHADOW4 = pygame.Surface((TILE, 4), pygame.SRCALPHA)
+    _TILE_SHADOW4.fill((*COL_G_BOT, 120))
+    _TILE_SHADOW3 = pygame.Surface((TILE, 3), pygame.SRCALPHA)
+    _TILE_SHADOW3.fill((*COL_G_BOT, 100))
+
+    # SRCALPHA bloom glows
+    _TILE_GLOW_G = pygame.Surface((TILE, 12), pygame.SRCALPHA)
+    _TILE_GLOW_G.fill((*COL_G_CAP, 15))
+    _TILE_GLOW_P = pygame.Surface((TILE + 4, 14), pygame.SRCALPHA)
+    _TILE_GLOW_P.fill((*COL_P_CAP, 30))
+
+
 # ── Tile drawing ──────────────────────────────────────────────────────────────
-def draw_tiles(surf: pygame.Surface, tiles: list, cam_x: int, cam_y: int) -> None:
-    """Draw ground and platform tiles with new palette."""
+def draw_tiles(surf: pygame.Surface, tiles: list, cam_x: int, cam_y: int,
+               t_ms: int = 0, shimmer: "dict | None" = None) -> None:
+    """Draw ground and platform tiles — Sea of Stars layered style."""
     for rect, solid in tiles:
         rx = rect.x - cam_x
         ry = rect.y - cam_y
-        if rx > WIDTH or rx + TILE < 0:
+        if rx > WIDTH + TILE or rx + TILE < 0:
             continue
+
         if solid:
-            pygame.draw.rect(surf, COL_GROUND, (rx, ry, TILE, TILE))
-            pygame.draw.rect(surf, COL_GROUND_EDGE, (rx, ry, TILE, 3))
+            row_i = rect.y // TILE
+            col_i = rect.x // TILE
+            # Air-above check: only expose teal cap on tiles with open sky above
+            air_above = (
+                row_i == 0
+                or col_i >= len(LEVEL[row_i - 1])
+                or LEVEL[row_i - 1][col_i] == " "
+            )
+
+            # Upward teal bloom (ground luminescence)
+            if air_above and _TILE_GLOW_G is not None:
+                surf.blit(_TILE_GLOW_G, (rx, ry - 12))
+
+            # Drop shadow below tile
+            if _TILE_SHADOW4 is not None:
+                surf.blit(_TILE_SHADOW4, (rx, ry + TILE))
+
+            # Tile face
+            face = _TILE_G_CAP if (air_above and _TILE_G_CAP) else _TILE_G_FILL
+            if face is not None:
+                surf.blit(face, (rx, ry))
+
+            # Shimmer flash: briefly whiten the teal cap on a random tile
+            if (air_above and shimmer and shimmer["timer"] > 0
+                    and shimmer["col"] == col_i and shimmer["row"] == row_i):
+                t = shimmer["timer"] / 6.0
+                scol = (
+                    int(COL_G_CAP[0] + (255 - COL_G_CAP[0]) * t),
+                    int(COL_G_CAP[1] + (255 - COL_G_CAP[1]) * t),
+                    int(COL_G_CAP[2] + (255 - COL_G_CAP[2]) * t),
+                )
+                pygame.draw.rect(surf, scol, (rx, ry, TILE, 5))
+
         else:
-            pygame.draw.rect(surf, COL_PLATFORM_DARK, (rx + 2, ry + 6, TILE, 8))
-            pygame.draw.rect(surf, COL_PLATFORM, (rx, ry + 4, TILE, 8),
-                             border_radius=3)
+            # Pass-through platform — thin 10px visual at tile_top + 4
+            ry_vis = ry + 4
+
+            # Amber bloom below platform
+            if _TILE_GLOW_P is not None:
+                surf.blit(_TILE_GLOW_P, (rx - 2, ry_vis + 7))
+
+            # Drop shadow below
+            if _TILE_SHADOW3 is not None:
+                surf.blit(_TILE_SHADOW3, (rx, ry_vis + 10))
+
+            # Platform base
+            if _TILE_P_BASE is not None:
+                surf.blit(_TILE_P_BASE, (rx, ry_vis))
+
+            # Pulsed amber cap (sin-driven between dim and full bright)
+            pulse_t   = 0.5 + 0.5 * math.sin(t_ms * 0.002 + rect.x * 0.1)
+            pulse_amt = 180 + int(75 * pulse_t)
+            pygame.draw.rect(surf,
+                             (min(255, 255 * pulse_amt // 255),
+                              min(255, 209 * pulse_amt // 255),
+                              min(255, 102 * pulse_amt // 255)),
+                             (rx, ry_vis, TILE, 3))
 
 
 # ── Particle system ───────────────────────────────────────────────────────────
 class ParticleSystem:
     """Manages dust and impact particles; no external assets."""
 
-    _dust_colors = [COL_GROUND_EDGE, COL_STAR_W, COL_STAR_B]
+    _dust_colors = [COL_G_CAP, COL_G_CAP, COL_STAR_B]   # teal dust matches ground glow
 
     def __init__(self) -> None:
         self.particles: list[dict] = []
@@ -344,6 +454,7 @@ class Coin:
         self.collected  = False
         self.bob_offset = random.uniform(0, math.tau)
         self.spin_phase = random.uniform(0, math.tau)
+        self._glow: "pygame.Surface | None" = None
 
     def update(self, player: "Player", particles: ParticleSystem) -> int:
         """Check collection. Returns 100 if just collected this frame, else 0."""
@@ -368,6 +479,12 @@ class Coin:
 
         r  = self.RADIUS
         by = ry + int(math.sin(t_ms * 0.003 + self.bob_offset) * 4)
+
+        # Soft gold bloom
+        if self._glow is None:
+            self._glow = pygame.Surface((28, 28), pygame.SRCALPHA)
+            pygame.draw.circle(self._glow, (255, 209, 102, 30), (14, 14), 14)
+        surf.blit(self._glow, (rx - 14, by - 14))
 
         # Gold fill
         pygame.draw.circle(surf, self._COL_GOLD, (rx, by), r)
@@ -405,6 +522,7 @@ class Enemy:
         self.patrol_x2 = patrol_x2
         self.alive     = True
         self.facing    = 1
+        self._glow: "pygame.Surface | None" = None
 
     @property
     def rect(self) -> pygame.Rect:
@@ -474,6 +592,12 @@ class Enemy:
         if rx < -40 or rx > WIDTH + 40:
             return
         r = self.RADIUS
+        # Soft red bloom
+        if self._glow is None:
+            self._glow = pygame.Surface((44, 44), pygame.SRCALPHA)
+            pygame.draw.circle(self._glow, (204, 34, 0, 20), (22, 22), 22)
+        surf.blit(self._glow, (rx - 22, ry - 22))
+
         # 8 spikes
         spike_len = r + 6
         for i in range(8):
@@ -499,115 +623,182 @@ class Enemy:
 
 # ── Parallax background ───────────────────────────────────────────────────────
 class ParallaxBackground:
-    """Three-layer parallax: ruins, drifting clouds, silhouette hills."""
+    """Sea of Stars night scene: mountains + spires, tree line, fog wisps, foreground hills."""
 
-    _COL_HILLS  = (18, 18, 36)
-    _COL_HILLS2 = (26, 26, 46)
+    # Palette
+    _FAR   = ( 13,   8,  32)   # #0D0820
+    _L1    = ( 17,  13,  46)   # #110D2E distant peaks
+    _L2    = ( 26,  16,  64)   # #1A1040 front hills / moon base
+    _L3    = ( 36,  21,  80)   # #241550 tree silhouette
+    _L4    = ( 45,  27,  94)   # #2D1B5E fog / tree highlight
+    _TEAL  = ( 78, 205, 196)   # #4ECDC4 bioluminescent accent
+    _CORAL = (255, 107, 107)   # #FF6B6B moon tint
 
     def __init__(self) -> None:
-        self._cloud_offset: float = 0.0
-        self._ruins_surf  = self._build_ruins()
-        self._hills       = self._build_hills()
-        self._clouds_surf = self._build_clouds()
+        self._fog_offset: float = 0.0
+        self._mtn_surf  = self._build_mountains()
+        self._tree_surf = self._build_trees()
+        self._fog       = self._build_fog()
+        self._fore_pts  = self._build_fore_hills()
+        self._moon_surf = self._build_moon()
 
     # ── Layer builders ──────────────────────────────────────────────────
-    def _build_ruins(self) -> pygame.Surface:
-        """Pre-render 6 faint geometric outlines to a 2×-wide SRCALPHA surface."""
-        surf = pygame.Surface((WIDTH * 2, HEIGHT), pygame.SRCALPHA)
-        col  = (26, 26, 46, 20)
-        rng  = random.Random(7)
-        for _ in range(6):
-            kind = rng.choice(["circle", "rect"])
-            x    = rng.randint(0, WIDTH * 2 - 1)
-            y    = rng.randint(HEIGHT // 4, HEIGHT - 80)
-            if kind == "circle":
-                r = rng.randint(10, 32)
-                pygame.draw.circle(surf, col, (x, y), r, 2)
-            else:
-                w = rng.randint(20, 55)
-                h = rng.randint(25, 65)
-                pygame.draw.rect(surf, col, (x, y - h, w, h), 2)
+
+    def _build_mountains(self) -> pygame.Surface:
+        """3×WIDTH jagged peaks + castle spires (two hill passes)."""
+        W3   = WIDTH * 3
+        surf = pygame.Surface((W3, HEIGHT), pygame.SRCALPHA)
+        rng  = random.Random(11)
+
+        # Back mountain range
+        pts = [(0, HEIGHT)]
+        x   = 0
+        while x < W3:
+            pts.append((x, HEIGHT - rng.randint(80, 140)))
+            x += rng.randint(50, 120)
+        pts.append((W3, HEIGHT))
+        pygame.draw.polygon(surf, self._L1, pts)
+
+        # Castle spires (4) with crenellated tops
+        for _ in range(4):
+            sx = rng.randint(0, W3)
+            sh = rng.randint(90, 155)
+            sw = rng.randint(12, 24)
+            sy = HEIGHT - sh
+            pygame.draw.rect(surf, self._FAR, (sx, sy, sw, sh))
+            notch_w = max(3, sw // 3)
+            for ci in range(3):
+                pygame.draw.rect(surf, self._FAR,
+                                 (sx + ci * (sw // 3), sy - 9, notch_w, 9))
+
+        # Front hill layer (rounder, lower)
+        pts2 = [(0, HEIGHT)]
+        x    = 0
+        while x < W3:
+            pts2.append((x, HEIGHT - rng.randint(60, 100)))
+            x += rng.randint(60, 140)
+        pts2.append((W3, HEIGHT))
+        pygame.draw.polygon(surf, self._L2, pts2)
+
         return surf
 
-    def _build_hills(self) -> tuple[list, list]:
-        """Two polygon hill layers."""
-        def make_layer(seed: int, y_base: int, amp: int, freq: float) -> list:
-            rng2 = random.Random(seed)
-            pts = [(0, HEIGHT)]
-            x = 0
-            while x <= WIDTH * 2 + 100:
-                h = y_base - int(amp * abs(math.sin(x * freq + rng2.uniform(0, 1))))
-                pts.append((x, h))
-                x += rng2.randint(40, 110)
-            pts.append((WIDTH * 2 + 100, HEIGHT))
-            return pts
-
-        layer1 = make_layer(3, HEIGHT - 60, 90, 0.008)
-        layer2 = make_layer(9, HEIGHT - 30, 50, 0.014)
-        return layer1, layer2
-
-    def _build_clouds(self) -> pygame.Surface:
-        """Pre-render thin horizontal atmosphere streaks to a 2×-wide surface."""
-        surf = pygame.Surface((WIDTH * 2, HEIGHT), pygame.SRCALPHA)
-        col  = (170, 170, 255)
-        rng  = random.Random(13)
-        for _ in range(30):
-            x     = rng.randint(0, WIDTH * 2 - 1)
-            y     = rng.randint(30, HEIGHT // 2 - 20)
-            w     = rng.randint(20, 60)
-            h     = rng.choice([3, 3, 4])
-            alpha = rng.randint(30, 50)
-            pygame.draw.rect(surf, (*col, alpha), (x, y, w, h))
-            if x + w > WIDTH * 2:          # wrap streak that bleeds off edge
-                pygame.draw.rect(surf, (*col, alpha),
-                                 (x + w - WIDTH * 2, y, w, h))
+    def _build_moon(self) -> pygame.Surface:
+        """Static moon — drawn before parallax layers each frame."""
+        r    = 45
+        size = r * 2 + 4
+        surf = pygame.Surface((size, size), pygame.SRCALPHA)
+        pygame.draw.circle(surf, (*self._L2, 255), (r + 2, r + 2), r)
+        pygame.draw.circle(surf, (*self._CORAL, 40), (r + 2, r + 2), r)
         return surf
 
-    # ── Draw ────────────────────────────────────────────────────────────
+    def _build_trees(self) -> pygame.Surface:
+        """2×WIDTH tree silhouettes with bioluminescent tips."""
+        W2   = WIDTH * 2
+        surf = pygame.Surface((W2, HEIGHT), pygame.SRCALPHA)
+        rng  = random.Random(17)
+        base_y = HEIGHT - 22
+
+        for _ in range(15):
+            tx  = rng.randint(0, W2)
+            th  = rng.randint(60, 120)
+            tw  = rng.randint(20, 35)
+            tip_y = base_y - th
+
+            # Trunk
+            tkw = max(4, tw // 5)
+            pygame.draw.rect(surf, self._L3,
+                             (tx - tkw // 2, base_y - th // 3, tkw, th // 3))
+
+            # Canopy — 3 stacked triangles, right-edge highlight
+            for layer in range(3):
+                ly  = tip_y + layer * (th // 4)
+                lw  = tw - layer * (tw // 6)
+                pts = [(tx, ly),
+                       (tx - lw // 2, ly + th // 4 + 4),
+                       (tx + lw // 2, ly + th // 4 + 4)]
+                pygame.draw.polygon(surf, self._L3, pts)
+                pygame.draw.line(surf, self._L4,
+                                 (tx, ly), (tx + lw // 2, ly + th // 4 + 4), 1)
+
+            # Bioluminescent tip
+            glow = pygame.Surface((8, 8), pygame.SRCALPHA)
+            pygame.draw.circle(glow, (*self._TEAL, 180), (4, 4), 2)
+            surf.blit(glow, (tx - 4, tip_y - 4))
+
+        return surf
+
+    def _build_fog(self) -> list[dict]:
+        """7 pre-rendered fog wisp surfaces; x drifts each frame."""
+        rng   = random.Random(23)
+        wisps = []
+        for _ in range(7):
+            w = rng.randint(80, 160)
+            h = rng.randint(8, 14)
+            a = rng.randint(25, 40)
+            s = pygame.Surface((w, h), pygame.SRCALPHA)
+            s.fill((*self._L4, a))
+            wisps.append({
+                "surf": s,
+                "x":    rng.uniform(0, WIDTH * 2),
+                "y":    rng.randint(HEIGHT // 2 - 40, HEIGHT - 90),
+            })
+        return wisps
+
+    def _build_fore_hills(self) -> list:
+        """Rounded foreground silhouette (2×WIDTH + margin)."""
+        rng = random.Random(29)
+        pts = [(0, HEIGHT)]
+        x   = 0
+        while x <= WIDTH * 2 + 100:
+            pts.append((x, HEIGHT - rng.randint(30, 50)))
+            x += rng.randint(60, 150)
+        pts.append((WIDTH * 2 + 100, HEIGHT))
+        return pts
+
+    # ── Update & draw ────────────────────────────────────────────────────
+
     def update(self) -> None:
-        self._cloud_offset += 0.3
+        self._fog_offset += 0.2
+        for w in self._fog:
+            w["x"] -= 0.2
+            if w["x"] + w["surf"].get_width() < 0:
+                w["x"] += WIDTH * 2
 
     def draw(self, surf: pygame.Surface, cam_x: int) -> None:
-        self._draw_ruins(surf, cam_x)
-        self._draw_hills(surf, cam_x)
-        self._draw_clouds(surf, cam_x)
+        # Moon — static, no parallax
+        surf.blit(self._moon_surf, (WIDTH // 3, HEIGHT // 6))
+        # Mountains (0.05× scroll)
+        self._blit_wrap(surf, self._mtn_surf, cam_x, 0.05, WIDTH * 3)
+        # Trees (0.15× scroll)
+        self._blit_wrap(surf, self._tree_surf, cam_x, 0.15, WIDTH * 2)
+        # Fog (0.4× scroll + drift)
+        self._draw_fog(surf, cam_x)
+        # Foreground hills (0.7× scroll)
+        self._draw_fore_hills(surf, cam_x)
 
-    def _draw_ruins(self, surf: pygame.Surface, cam_x: int) -> None:
-        """Blit pre-rendered ruins at 0.1× parallax speed, wrapping."""
-        scroll = int(cam_x * 0.1) % (WIDTH * 2)
-        blit_w = min(WIDTH, WIDTH * 2 - scroll)
-        surf.blit(self._ruins_surf, (0, 0), (scroll, 0, blit_w, HEIGHT))
+    def _blit_wrap(self, surf: pygame.Surface, layer: pygame.Surface,
+                   cam_x: int, speed: float, total_w: int) -> None:
+        scroll = int(cam_x * speed) % total_w
+        blit_w = min(WIDTH, total_w - scroll)
+        surf.blit(layer, (0, 0), (scroll, 0, blit_w, HEIGHT))
         if blit_w < WIDTH:
-            surf.blit(self._ruins_surf, (blit_w, 0),
-                      (0, 0, WIDTH - blit_w, HEIGHT))
+            surf.blit(layer, (blit_w, 0), (0, 0, WIDTH - blit_w, HEIGHT))
 
-    def _draw_hills(self, surf: pygame.Surface, cam_x: int) -> None:
-        layer1, layer2 = self._hills
-        shift = cam_x * 0.6
+    def _draw_fog(self, surf: pygame.Surface, cam_x: int) -> None:
+        base_scroll = int(cam_x * 0.4)
+        for w in self._fog:
+            rx = int(w["x"] - base_scroll) % (WIDTH * 2)
+            if rx > WIDTH + w["surf"].get_width():
+                continue
+            surf.blit(w["surf"], (rx, int(w["y"])))
 
-        def offset_pts(pts: list, dx: float) -> list:
-            moved = []
-            wrap  = WIDTH * 2 + 100
-            for (x, y) in pts:
-                nx = (x - dx) % wrap
-                moved.append((int(nx), int(y)))
-            return moved
-
-        pts1 = offset_pts(layer1, shift)
-        pts2 = offset_pts(layer2, shift)
-        if len(pts1) >= 3:
-            pygame.draw.polygon(surf, self._COL_HILLS, pts1)
-        if len(pts2) >= 3:
-            pygame.draw.polygon(surf, self._COL_HILLS2, pts2)
-
-    def _draw_clouds(self, surf: pygame.Surface, cam_x: int) -> None:
-        """Blit pre-rendered streak surface at 0.3× parallax + slow drift."""
-        scroll = int(self._cloud_offset + cam_x * 0.3) % (WIDTH * 2)
-        blit_w = min(WIDTH, WIDTH * 2 - scroll)
-        surf.blit(self._clouds_surf, (0, 0), (scroll, 0, blit_w, HEIGHT))
-        if blit_w < WIDTH:
-            surf.blit(self._clouds_surf, (blit_w, 0),
-                      (0, 0, WIDTH - blit_w, HEIGHT))
+    def _draw_fore_hills(self, surf: pygame.Surface, cam_x: int) -> None:
+        shift = cam_x * 0.7
+        wrap  = WIDTH * 2 + 100
+        moved = [((int(x) - int(shift)) % wrap, int(y))
+                 for x, y in self._fore_pts]
+        if len(moved) >= 3:
+            pygame.draw.polygon(surf, (27, 16, 64), moved)
 
 
 # ── CRT overlay ───────────────────────────────────────────────────────────────
@@ -688,9 +879,9 @@ def draw_hud(surf: pygame.Surface, player: "Player",
     fill   = int(bar_w * speed / MAX_SPEED)
     lbl    = font_sm.render("SPD", True, COL_HUD_LABEL)
     surf.blit(lbl, (bar_x - lbl.get_width() - 4, bar_y - 1))
-    pygame.draw.rect(surf, (40, 40, 60), (bar_x, bar_y, bar_w, bar_h))
-    pygame.draw.rect(surf, COL_HUD_VALUE, (bar_x, bar_y, fill, bar_h))
-    pygame.draw.rect(surf, COL_HUD_LABEL, (bar_x, bar_y, bar_w, bar_h), 1)
+    pygame.draw.rect(surf, (20, 14, 50),   (bar_x, bar_y, bar_w, bar_h))
+    pygame.draw.rect(surf, COL_G_CAP,      (bar_x, bar_y, fill, bar_h))   # teal fill
+    pygame.draw.rect(surf, COL_HUD_LABEL,  (bar_x, bar_y, bar_w, bar_h), 1)
 
     # State icon (below bar)
     ix, iy = bar_x + bar_w // 2, bar_y + bar_h + 10
@@ -1065,6 +1256,7 @@ def run_character_select(screen: pygame.Surface,
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     pygame.init()
+    _build_tile_surfaces()   # must be called after pygame.init()
     screen   = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("retro-pants")
     clock    = pygame.time.Clock()
@@ -1100,6 +1292,18 @@ def main() -> None:
     score       = 0
     float_texts: list[dict] = []
     frame       = 0
+
+    # Ground shimmer state — briefly flashes a random cap tile's teal edge
+    # Build list of cap-eligible (col, row) pairs once
+    _cap_tiles = [
+        (rect.x // TILE, rect.y // TILE)
+        for rect, solid in tiles
+        if solid
+        and rect.y // TILE > 0
+        and rect.x // TILE < len(LEVEL[rect.y // TILE - 1])
+        and LEVEL[rect.y // TILE - 1][rect.x // TILE] == " "
+    ]
+    shimmer: dict = {"col": 0, "row": 0, "timer": 0, "next": 90}
 
     while True:
         for event in pygame.event.get():
@@ -1141,6 +1345,16 @@ def main() -> None:
         camera.update(player.x)
         parallax.update()
 
+        # Shimmer: every 90 frames pick a random cap tile and flash it for 6 frames
+        shimmer["next"] -= 1
+        if shimmer["next"] <= 0:
+            shimmer["next"]  = 90
+            shimmer["timer"] = 6
+            if _cap_tiles:
+                shimmer["col"], shimmer["row"] = random.choice(_cap_tiles)
+        if shimmer["timer"] > 0:
+            shimmer["timer"] -= 1
+
         cx, cy = camera.cx, camera.cy
         t_ms   = pygame.time.get_ticks()
 
@@ -1148,7 +1362,7 @@ def main() -> None:
         game_surf.fill(COL_BG)
         draw_stars(game_surf, cx, frame)
         parallax.draw(game_surf, cx)
-        draw_tiles(game_surf, tiles, cx, cy)
+        draw_tiles(game_surf, tiles, cx, cy, t_ms, shimmer)
         for coin in coins:
             coin.draw(game_surf, cx, cy, t_ms)
         particles.draw(game_surf, cx, cy)
