@@ -210,9 +210,6 @@ def _build_tile_surfaces() -> None:
     def _ground(cap: bool) -> pygame.Surface:
         s = pygame.Surface((TILE, TILE))
         s.fill(COL_G_BASE)
-        pygame.draw.rect(s, COL_G_DARK, (0,        0, 3,    TILE))   # left edge
-        pygame.draw.rect(s, COL_G_DARK, (TILE - 3, 0, 3,    TILE))   # right edge
-        pygame.draw.rect(s, COL_G_BOT,  (0,  TILE - 2, TILE, 2))     # bottom edge
         if cap:
             pygame.draw.rect(s, COL_G_CAP, (0, 0, TILE, 5))          # teal highlight
             pygame.draw.rect(s, COL_G_MID, (0, 5, TILE, 4))          # mid purple
@@ -483,7 +480,7 @@ class Coin:
         # Soft gold bloom
         if self._glow is None:
             self._glow = pygame.Surface((28, 28), pygame.SRCALPHA)
-            pygame.draw.circle(self._glow, (255, 209, 102, 30), (14, 14), 14)
+            pygame.draw.circle(self._glow, (255, 224, 102, 35), (14, 14), 14)
         surf.blit(self._glow, (rx - 14, by - 14))
 
         # Gold fill
@@ -591,34 +588,47 @@ class Enemy:
         ry = int(self.y) - cam_y
         if rx < -40 or rx > WIDTH + 40:
             return
-        r = self.RADIUS
-        # Soft red bloom
-        if self._glow is None:
-            self._glow = pygame.Surface((44, 44), pygame.SRCALPHA)
-            pygame.draw.circle(self._glow, (204, 34, 0, 20), (22, 22), 22)
-        surf.blit(self._glow, (rx - 22, ry - 22))
+        r  = self.RADIUS
+        s  = 1.3   # draw 30% larger than hitbox
+        sr = int(r * s)
 
-        # 8 spikes
-        spike_len = r + 6
+        # Soft red bloom (scaled)
+        br = int(22 * s)
+        if self._glow is None:
+            self._glow = pygame.Surface((br * 2, br * 2), pygame.SRCALPHA)
+            pygame.draw.circle(self._glow, (204, 34, 0, 20), (br, br), br)
+        surf.blit(self._glow, (rx - br, ry - br))
+
+        # 8 spikes (scaled)
+        spike_len = int((r + 6) * s)
         for i in range(8):
-            ang = i * math.pi / 4
+            ang  = i * math.pi / 4
             tip  = (int(rx + math.cos(ang) * spike_len),
                     int(ry + math.sin(ang) * spike_len))
-            bl   = (int(rx + math.cos(ang - 0.3) * r),
-                    int(ry + math.sin(ang - 0.3) * r))
-            br   = (int(rx + math.cos(ang + 0.3) * r),
-                    int(ry + math.sin(ang + 0.3) * r))
-            pygame.draw.polygon(surf, self._COL_DARK, [tip, bl, br])
-        # Body
-        pygame.draw.circle(surf, self._COL_BODY, (rx, ry), r)
-        pygame.draw.circle(surf, self._COL_DARK,  (rx, ry), r, 2)
-        # Angry eyes
-        for ex_off in (-4, 4):
-            pygame.draw.circle(surf, self._COL_EYE, (rx + ex_off, ry - 2), 3)
-            pygame.draw.circle(surf, (0, 0, 0),      (rx + ex_off, ry - 1), 1)
-        # Angry brows (inner-corner raised = angry)
-        pygame.draw.line(surf, self._COL_DARK, (rx - 7, ry - 6), (rx - 2, ry - 4), 2)
-        pygame.draw.line(surf, self._COL_DARK, (rx + 2, ry - 4), (rx + 7, ry - 6), 2)
+            bl   = (int(rx + math.cos(ang - 0.3) * sr),
+                    int(ry + math.sin(ang - 0.3) * sr))
+            brp  = (int(rx + math.cos(ang + 0.3) * sr),
+                    int(ry + math.sin(ang + 0.3) * sr))
+            pygame.draw.polygon(surf, self._COL_DARK, [tip, bl, brp])
+
+        # Body (scaled)
+        pygame.draw.circle(surf, self._COL_BODY, (rx, ry), sr)
+        pygame.draw.circle(surf, self._COL_DARK,  (rx, ry), sr, 2)
+
+        # Angry eyes (scaled offsets)
+        eo = int(4 * s)
+        er = int(3 * s)
+        for ex_off in (-eo, eo):
+            pygame.draw.circle(surf, self._COL_EYE, (rx + ex_off, ry - int(2 * s)), er)
+            pygame.draw.circle(surf, (0, 0, 0),      (rx + ex_off, ry - int(s)),    max(1, er - 2))
+
+        # Angry brows (scaled)
+        pygame.draw.line(surf, self._COL_DARK,
+                         (rx - int(7 * s), ry - int(6 * s)),
+                         (rx - int(2 * s), ry - int(4 * s)), 2)
+        pygame.draw.line(surf, self._COL_DARK,
+                         (rx + int(2 * s), ry - int(4 * s)),
+                         (rx + int(7 * s), ry - int(6 * s)), 2)
 
 
 # ── Parallax background ───────────────────────────────────────────────────────
@@ -683,47 +693,50 @@ class ParallaxBackground:
         return surf
 
     def _build_moon(self) -> pygame.Surface:
-        """Static moon — drawn before parallax layers each frame."""
-        r    = 45
-        size = r * 2 + 4
+        """Static moon — soft lavender, r=38, with inner glow halo."""
+        r    = 38
+        size = (r + 6) * 2
+        cx   = size // 2
         surf = pygame.Surface((size, size), pygame.SRCALPHA)
-        pygame.draw.circle(surf, (*self._L2, 255), (r + 2, r + 2), r)
-        pygame.draw.circle(surf, (*self._CORAL, 40), (r + 2, r + 2), r)
+        # Inner glow halo (slightly larger, very faint)
+        pygame.draw.circle(surf, (196, 168, 224, 20), (cx, cx), r + 4)
+        # Moon body: #C4A8E0 lavender
+        pygame.draw.circle(surf, (196, 168, 224, 255), (cx, cx), r)
         return surf
 
     def _build_trees(self) -> pygame.Surface:
-        """2×WIDTH tree silhouettes with bioluminescent tips."""
-        W2   = WIDTH * 2
-        surf = pygame.Surface((W2, HEIGHT), pygame.SRCALPHA)
-        rng  = random.Random(17)
+        """2×WIDTH organic round-canopy tree silhouettes with bioluminescent tips."""
+        W2     = WIDTH * 2
+        surf   = pygame.Surface((W2, HEIGHT), pygame.SRCALPHA)
+        rng    = random.Random(17)
         base_y = HEIGHT - 22
 
         for _ in range(15):
-            tx  = rng.randint(0, W2)
-            th  = rng.randint(60, 120)
-            tw  = rng.randint(20, 35)
-            tip_y = base_y - th
+            tx    = rng.randint(0, W2)
+            c_r   = rng.randint(10, 16)   # main canopy radius
+            has_top = rng.random() < 0.55
+            c_r2  = rng.randint(6, 10) if has_top else 0
 
-            # Trunk
-            tkw = max(4, tw // 5)
-            pygame.draw.rect(surf, self._L3,
-                             (tx - tkw // 2, base_y - th // 3, tkw, th // 3))
+            # Trunk: 4px wide, 12px tall, colour #1A1040
+            pygame.draw.rect(surf, self._L2,
+                             (tx - 2, base_y - 12, 4, 12))
 
-            # Canopy — 3 stacked triangles, right-edge highlight
-            for layer in range(3):
-                ly  = tip_y + layer * (th // 4)
-                lw  = tw - layer * (tw // 6)
-                pts = [(tx, ly),
-                       (tx - lw // 2, ly + th // 4 + 4),
-                       (tx + lw // 2, ly + th // 4 + 4)]
-                pygame.draw.polygon(surf, self._L3, pts)
-                pygame.draw.line(surf, self._L4,
-                                 (tx, ly), (tx + lw // 2, ly + th // 4 + 4), 1)
+            # Main canopy circle
+            canopy_cy = base_y - 12 - c_r + 3
+            pygame.draw.circle(surf, self._L2, (tx, canopy_cy), c_r)
+
+            # Optional second smaller circle on top
+            if has_top:
+                top_cy = canopy_cy - c_r - c_r2 + 4
+                pygame.draw.circle(surf, self._L2, (tx, top_cy), c_r2)
+                tip_y = top_cy - c_r2
+            else:
+                tip_y = canopy_cy - c_r
 
             # Bioluminescent tip
             glow = pygame.Surface((8, 8), pygame.SRCALPHA)
             pygame.draw.circle(glow, (*self._TEAL, 180), (4, 4), 2)
-            surf.blit(glow, (tx - 4, tip_y - 4))
+            surf.blit(glow, (tx - 4, tip_y - 2))
 
         return surf
 

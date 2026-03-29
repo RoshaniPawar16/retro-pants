@@ -11,32 +11,23 @@ import math
 import random
 
 # ── Colors ────────────────────────────────────────────────────────────────────
-C_BODY   = (255,  0,   0)    # default ghost red
-C_SCARED = (  0,  0, 204)    # frightened blue
-C_BLACK  = (  0,  0,   0)
-C_WHITE  = (255, 255, 255)
-C_PUPIL  = ( 26, 26, 255)    # #1a1aff  bright blue pupils
+C_BODY    = (255,  0,   0)    # default ghost red
+C_SCARED  = (  0,  0, 204)    # frightened blue
+C_BLACK   = (  0,  0,   0)
+C_WHITE   = (255, 255, 255)
+C_PUPIL   = ( 26, 26, 255)    # #1a1aff  bright blue pupils
+C_OUTLINE = ( 26, 10,  46)    # #1A0A2E  Sea of Stars soft dark purple
 
-# ── Gameplay color boost ───────────────────────────────────────────────────────
-_COLOR_BOOST: dict[tuple, tuple] = {
-    (255,  51,  51): (255,  34,  34),   # Blinky
-    (255, 130, 190): (255, 110, 180),   # Pinky
-    (  0, 207, 207): (  0, 234, 234),   # Inky
-    (255, 184,  71): (255, 170,   0),   # Clyde
-}
-
-
+# ── Gameplay color — soft painterly desaturation ──────────────────────────────
 def _gameplay_color(color: tuple) -> tuple:
-    """Return a CRT-compensated version of the ghost body color."""
-    if color in _COLOR_BOOST:
-        return _COLOR_BOOST[color]
-    return tuple(min(255, c + 25) for c in color)  # type: ignore[return-value]
+    """Soften the ghost color: 80% original + 20% white — painterly, not arcade-harsh."""
+    return tuple(min(255, int(c * 0.80 + 255 * 0.20)) for c in color)  # type: ignore[return-value]
 
 
 # ── Base ghost dimensions (pixels) ────────────────────────────────────────────
-_DOME_R = 14
+_DOME_R = 17   # +20% wider/chunkier (was 14)
 _BODY_H = 14
-_BUMP_H =  6
+_BUMP_H =  5
 
 _TRAIL_ALPHAS = (80, 50, 25, 10)
 _TRAIL_SURF_W = 52
@@ -52,16 +43,17 @@ def _ghost_pts(cx: int, cy: int,
                tentacle_drift: int = 0,
                wobble_in: int = 0) -> list[tuple[int, int]]:
     """
-    Build the complete ghost polygon: dome → rect sides → zigzag bottom.
-    ts             = tentacle scale multiplier (1.0 for gameplay).
-    tentacle_drift = x offset applied to all tentacle tips (streaming backward).
-    wobble_in      = inward tip offset for shape-B idle wobble.
+    Build the complete ghost polygon: dome → sides → smooth 3-bump bottom.
+    ts             = scale multiplier (character select).
+    tentacle_drift = x-shift on all bottom points (speed streaming).
+    wobble_in      = flatten bumps inward for shape-B idle.
     """
     pts: list[tuple[int, int]] = []
 
-    N = 10
+    # Dome: 14 points for a rounder arc
+    N = 14
     for i in range(N + 1):
-        rad = math.radians(180.0 - i * 18.0)
+        rad = math.radians(180.0 - i * 180.0 / N)
         pts.append((
             cx + int(dome_r * math.cos(rad)),
             cy - int(dome_r * math.sin(rad)),
@@ -70,20 +62,32 @@ def _ghost_pts(cx: int, cy: int,
     body_bot = cy + body_h
     pts.append((cx + dome_r, body_bot))
 
-    t10 = max(1, int(10 * ts))
-    t5  = max(1, int(5  * ts))
-    bh  = bump_h + (1 if anim else 0)
-    td  = tentacle_drift
-    wi  = wobble_in
-    pts += [
-        (cx + t10 + td - wi, body_bot + bh),
-        (cx + t5  + td,      body_bot),
-        (cx       + td,      body_bot + bh),
-        (cx - t5  + td,      body_bot),
-        (cx - t10 + td + wi, body_bot + bh),
-    ]
+    # Smooth 3-bump bottom via sampled sine wave (right → left)
+    bh    = bump_h + (1 if anim else 0)
+    if wobble_in > 0:
+        bh = max(1, bh - wobble_in)
+    td    = tentacle_drift
+    n_pts = 24    # sample count for smooth curve
+    for i in range(n_pts + 1):
+        t  = i / n_pts                           # 0 = right side, 1 = left side
+        bx = int(cx + dome_r - t * dome_r * 2) + td
+        by = body_bot + int(bh * abs(math.sin(t * math.pi * 3)))
+        pts.append((bx, by))
+
     pts.append((cx - dome_r, body_bot))
     return pts
+
+
+def _tentacle_nub_positions(cx: int, body_bot: int, dome_r: int,
+                             bump_h: int, tentacle_drift: int) -> list[tuple[int, int]]:
+    """Return the (x, y) centres of the 3 tentacle tips for nub drawing."""
+    bh = bump_h
+    td = tentacle_drift
+    return [
+        (int(cx + dome_r * (1 - 2 * k / 3) - dome_r / 3) + td,
+         body_bot + bh)
+        for k in range(3)
+    ]
 
 
 def _apply_shear(pts: list[tuple[int, int]],
@@ -110,37 +114,49 @@ def _draw_eyes(surf: pygame.Surface,
                vy: float = 0.0,
                land_squash: int = 0,
                t_ms: int = 0,
-               speed: float = 0.0) -> None:
+               speed: float = 0.0,
+               body_color: tuple = (255, 0, 0)) -> None:
     """
-    Two large expressive eyes. Expression changes by state.
-    Draw order: body → _draw_eyes → glow.
+    Sea of Stars style expressive eyes with colored iris, dual glint, cheek blush.
     """
     body_top = dome_cy - dome_r
-    ey       = body_top + 12      # eye centre y — upper third of ghost
-    ex_left  = cx - 9
-    ex_right = cx + 9
+    ey       = body_top + 13
+    ex_left  = cx - 10
+    ex_right = cx + 10
 
-    # ── Happy squint: just landed (land_squash > 3) ────────────────────────
+    # Iris color: 50% body color + 50% white
+    iris_col = tuple(min(255, int(c * 0.5 + 127)) for c in body_color)
+    # Blush color: body color × 0.4 + white × 0.6
+    blush_col = tuple(min(255, int(c * 0.40 + 153)) for c in body_color)
+
+    def _blush(ey_local: int) -> None:
+        """Always-on subtle cheek blush."""
+        ck = pygame.Surface((58, 16), pygame.SRCALPHA)
+        pygame.draw.circle(ck, (*blush_col, 60), ( 8, 8), 5)
+        pygame.draw.circle(ck, (*blush_col, 60), (50, 8), 5)
+        surf.blit(ck, (cx - 29, ey_local + 6))
+
+    # ── Happy squint (land_squash > 3) ────────────────────────────────────
     if land_squash > 3:
-        eye_w = 12
+        eye_w = 14
         for ex in (ex_left, ex_right):
-            # Filled top-half oval approximated via clipped SRCALPHA surface
-            h_surf = pygame.Surface((eye_w, 7), pygame.SRCALPHA)
-            full   = pygame.Surface((eye_w, 14), pygame.SRCALPHA)
-            pygame.draw.ellipse(full, C_WHITE, (0, 0, eye_w, 14))
-            h_surf.blit(full, (0, 0))   # only top 7px visible
+            h_surf = pygame.Surface((eye_w, 8), pygame.SRCALPHA)
+            full   = pygame.Surface((eye_w, 16), pygame.SRCALPHA)
+            pygame.draw.ellipse(full, C_WHITE, (0, 0, eye_w, 16))
+            h_surf.blit(full, (0, 0))
             surf.blit(h_surf, (ex - eye_w // 2, ey - 4))
-        # Rosy cheeks
-        ck = pygame.Surface((52, 14), pygame.SRCALPHA)
-        pygame.draw.circle(ck, (255, 153, 153, 80), ( 7, 7), 5)
-        pygame.draw.circle(ck, (255, 153, 153, 80), (45, 7), 5)
-        surf.blit(ck, (cx - 26, ey + 5))
+        # Big rosy cheeks on happy
+        ck2 = pygame.Surface((62, 18), pygame.SRCALPHA)
+        pygame.draw.circle(ck2, (*blush_col, 110), ( 9, 9), 7)
+        pygame.draw.circle(ck2, (*blush_col, 110), (53, 9), 7)
+        surf.blit(ck2, (cx - 31, ey + 5))
         return
 
-    # ── Idle blink (~every 3 s, lasts 100 ms) ─────────────────────────────
+    # ── Idle blink (~every 3 s, 100 ms) ───────────────────────────────────
     if s == "idle" and (t_ms % 3000) < 100:
         for ex in (ex_left, ex_right):
-            pygame.draw.rect(surf, C_WHITE, (ex - 5, ey - 1, 11, 2))
+            pygame.draw.rect(surf, C_WHITE, (ex - 6, ey - 1, 13, 3))
+        _blush(ey)
         return
 
     # ── State flags ───────────────────────────────────────────────────────
@@ -150,11 +166,11 @@ def _draw_eyes(surf: pygame.Surface,
 
     # ── Eye dimensions ────────────────────────────────────────────────────
     if is_jump:
-        ew, eh = 13, 17
+        ew, eh = 13, 18
     elif is_fast:
-        ew, eh = 11, 11     # squashed — intense running look
+        ew, eh = 12, 11
     else:
-        ew, eh = 11, 14
+        ew, eh = 13, 16   # base: 13×16
 
     # ── Pupil offset ─────────────────────────────────────────────────────
     if is_jump:
@@ -162,34 +178,44 @@ def _draw_eyes(surf: pygame.Surface,
     elif is_fall:
         pdx, pdy = 0,  5
     elif is_fast:
-        pdx, pdy = f * 5, 0
+        pdx, pdy = f * 4, 0
     elif s == "idle":
         pdx = int(math.sin(t_ms * 0.002) * 2)
         pdy = 0
     else:
-        pdx, pdy = f * 4, 0
+        pdx, pdy = f * 3, 0
 
-    # ── White ovals + pupils ──────────────────────────────────────────────
+    # ── White ovals + colored iris + dark pupil + dual glints ────────────
     for ex in (ex_left, ex_right):
+        # White oval
         pygame.draw.ellipse(surf, C_WHITE,
                             (ex - ew // 2, ey - eh // 2, ew, eh))
-        pygame.draw.ellipse(surf, C_BLACK,
+        # Outline: soft dark purple, 2px
+        pygame.draw.ellipse(surf, C_OUTLINE,
                             (ex - ew // 2, ey - eh // 2, ew, eh), 2)
-        pygame.draw.circle(surf, C_PUPIL, (ex + pdx, ey + pdy), 6)
-        pygame.draw.circle(surf, C_WHITE, (ex + pdx + 2, ey + pdy - 2), 2)
+        # Colored iris (r=7)
+        pygame.draw.circle(surf, iris_col, (ex + pdx, ey + pdy), 7)
+        # Dark pupil (r=4, #1A0A2E)
+        pygame.draw.circle(surf, C_OUTLINE, (ex + pdx, ey + pdy), 4)
+        # Large glint
+        pygame.draw.circle(surf, C_WHITE,
+                           (ex + pdx + 2, ey + pdy - 2), 2)
+        # Small glint
+        pygame.draw.circle(surf, C_WHITE,
+                           (ex + pdx + 3, ey + pdy + 1), 1)
 
-    # ── Jump: raised brows (outward) + sweat drop ─────────────────────────
+    # ── Always-on blush ───────────────────────────────────────────────────
+    _blush(ey)
+
+    # ── Jump: raised brows + sweat drop ───────────────────────────────────
     if is_jump:
         brow_y = ey - eh // 2 - 4
-        # Left brow: \ (outer corner higher)
-        pygame.draw.line(surf, C_BLACK,
+        pygame.draw.line(surf, C_OUTLINE,
                          (ex_left  - 6, brow_y - 2),
                          (ex_left  + 4, brow_y + 2), 2)
-        # Right brow: / (outer corner higher)
-        pygame.draw.line(surf, C_BLACK,
+        pygame.draw.line(surf, C_OUTLINE,
                          (ex_right - 4, brow_y + 2),
                          (ex_right + 6, brow_y - 2), 2)
-        # Sweat drop on side opposite to facing direction
         sd_x = cx - f * (dome_r + 5)
         sd_y = dome_cy - dome_r // 2
         pygame.draw.circle(surf, (100, 180, 255), (sd_x, sd_y + 4), 3)
@@ -197,18 +223,22 @@ def _draw_eyes(surf: pygame.Surface,
             (sd_x, sd_y - 4), (sd_x - 3, sd_y + 2), (sd_x + 3, sd_y + 2)
         ])
 
-    # ── Fast run: angry angled brows (downward toward centre) ─────────────
+    # ── Fast run: soft curved brows (arc-based, less harsh) ───────────────
     elif is_fast:
         brow_y = ey - eh // 2 - 3
-        pygame.draw.line(surf, C_BLACK,
-                         (cx - 14, brow_y - 2), (cx -  6, brow_y + 2), 3)
-        pygame.draw.line(surf, C_BLACK,
-                         (cx +  6, brow_y + 2), (cx + 14, brow_y - 2), 3)
+        # Left brow: gentle curve downward toward center
+        bl = pygame.Rect(cx - 16, brow_y - 3, 11, 7)
+        pygame.draw.arc(surf, C_OUTLINE, bl,
+                        math.radians(200), math.radians(330), 2)
+        # Right brow: mirror
+        br_rect = pygame.Rect(cx + 5, brow_y - 3, 11, 7)
+        pygame.draw.arc(surf, C_OUTLINE, br_rect,
+                        math.radians(210), math.radians(340), 2)
 
-    # ── Fall: small worried mouth ─────────────────────────────────────────
+    # ── Fall: worried mouth ────────────────────────────────────────────────
     if is_fall and not is_fast:
-        mouth_rect = pygame.Rect(cx - 7, dome_cy + 8, 14, 7)
-        pygame.draw.arc(surf, C_BLACK, mouth_rect,
+        mouth_rect = pygame.Rect(cx - 7, dome_cy + 9, 14, 7)
+        pygame.draw.arc(surf, C_OUTLINE, mouth_rect,
                         math.pi, 2 * math.pi, 2)
 
 
@@ -250,22 +280,29 @@ def draw_ghost_preview(surf: pygame.Surface,
     dome_cy = cy - total_h // 2 + dome_r
 
     pts = _ghost_pts(cx, dome_cy, dome_r, body_h, bump_h, anim, ts=scale)
+    # Soft drop shadow offset +1
+    shadow_pts = [(x + 1, y + 1) for x, y in pts]
+    pygame.draw.polygon(surf, C_OUTLINE, shadow_pts)
     pygame.draw.polygon(surf, color, pts)
-    pygame.draw.polygon(surf, C_BLACK, pts, 2)
+    pygame.draw.polygon(surf, C_OUTLINE, pts, 2)
 
-    body_top = dome_cy - dome_r
-    ey       = body_top + max(4, int(12 * scale))
-    ex_off   = max(3, int(9  * scale))
-    ew       = max(4, int(11 * scale))
-    eh       = max(5, int(14 * scale))
-    pr       = max(2, int(6  * scale))
-    glint_r  = max(1, int(2  * scale))
+    body_top  = dome_cy - dome_r
+    ey        = body_top + max(4, int(13 * scale))
+    ex_off    = max(3, int(10 * scale))
+    ew        = max(4, int(13 * scale))
+    eh        = max(5, int(16 * scale))
+    iris_r    = max(3, int(7  * scale))
+    pupil_r   = max(2, int(4  * scale))
+    glint_r   = max(1, int(2  * scale))
+    iris_col  = tuple(min(255, int(c * 0.5 + 127)) for c in color)
 
     for ex in (cx - ex_off, cx + ex_off):
-        pygame.draw.ellipse(surf, C_WHITE, (ex - ew // 2, ey - eh // 2, ew, eh))
-        pygame.draw.ellipse(surf, C_BLACK, (ex - ew // 2, ey - eh // 2, ew, eh), 2)
-        pygame.draw.circle(surf, C_PUPIL, (ex, ey), pr)
-        pygame.draw.circle(surf, C_WHITE, (ex + glint_r, ey - glint_r), glint_r)
+        pygame.draw.ellipse(surf, C_WHITE,    (ex - ew // 2, ey - eh // 2, ew, eh))
+        pygame.draw.ellipse(surf, C_OUTLINE,  (ex - ew // 2, ey - eh // 2, ew, eh), 2)
+        pygame.draw.circle(surf, iris_col,    (ex, ey), iris_r)
+        pygame.draw.circle(surf, C_OUTLINE,   (ex, ey), pupil_r)
+        pygame.draw.circle(surf, C_WHITE,     (ex + glint_r, ey - glint_r), glint_r)
+        pygame.draw.circle(surf, C_WHITE,     (ex + glint_r + 1, ey + 1), max(1, glint_r - 1))
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -328,9 +365,13 @@ def draw_fancy_player(surf: pygame.Surface,
     anim = (fr // 2) % 2
 
     if speed > 5:
-        # Tentacles stream backward
+        # Tentacles stream backward when running fast
         tentacle_drift = int(-f * min(speed * 0.8, 12))
         wobble_in      = 0
+    elif s == "idle":
+        # Gentle sway in idle
+        tentacle_drift = int(math.sin(t_ms * 0.0015) * 4)
+        wobble_in      = 3 if ((t_ms // 200) % 2 == 1) else 0
     else:
         tentacle_drift = 0
         wobble_in      = 3 if ((t_ms // 200) % 2 == 1) else 0
@@ -420,15 +461,28 @@ def draw_fancy_player(surf: pygame.Surface,
     pts = _ghost_pts(cx, dome_cy, dome_r, body_h, bump_h, anim,
                      tentacle_drift=tentacle_drift, wobble_in=wobble_in)
     pts = _apply_shear(pts, shear_x, body_bot, total_range)
+
+    # Soft drop shadow: dark shape +1px down-right, then body on top
+    shadow_pts = [(x + 1, y + 1) for x, y in pts]
+    pygame.draw.polygon(surf, C_OUTLINE, shadow_pts)
     pygame.draw.polygon(surf, body_col, pts)
-    pygame.draw.polygon(surf, C_BLACK,  pts, 2)
+    pygame.draw.polygon(surf, C_OUTLINE, pts, 2)
+
+    # Tentacle nubs: small circles at the 3 bump tips
+    nub_col = body_col
+    nub_positions = _tentacle_nub_positions(
+        cx, body_bot, dome_r, bump_h + (1 if anim else 0), tentacle_drift)
+    for nx, ny in nub_positions:
+        pygame.draw.circle(surf, nub_col, (nx, ny), 3)
+        pygame.draw.circle(surf, C_OUTLINE, (nx, ny), 3, 1)
 
     # ── 6. Eyes / scared face ─────────────────────────────────────────────
     if scared:
         _draw_scared_face(surf, cx, dome_cy, dome_r)
     else:
         _draw_eyes(surf, cx, dome_cy, dome_r, f, s, vy,
-                   land_squash, t_ms, speed)
+                   land_squash, t_ms, speed,
+                   body_color=player_color)
 
     # ── 7. Neon glow (bloom on top — alpha 40, barely tints eyes) ─────────
     glow_surf = pygame.Surface((64, 72), pygame.SRCALPHA)
