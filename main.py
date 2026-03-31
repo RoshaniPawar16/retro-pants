@@ -4,7 +4,7 @@ import pygame
 import sys
 import math
 import random
-from draw_player import draw_fancy_player, draw_ghost_preview
+from draw_player import draw_fancy_player, draw_star_kid_preview as draw_ghost_preview
 
 # ── Display ──────────────────────────────────────────────────────────────────
 WIDTH, HEIGHT = 960, 540
@@ -1124,6 +1124,12 @@ def run_character_select(screen: pygame.Surface,
     Show ghost character selection screen.
     Returns the chosen body color tuple when the player confirms.
     """
+    # TEMP: skip selection screen while tuning character visuals.
+    # Re-enable by removing these two lines and uncommenting the block below.
+    selected_index = 0
+    return GHOST_OPTIONS[selected_index]["color"]
+
+    # ── Selection screen (commented out) ──────────────────────────────────
     font_title = pygame.font.SysFont("monospace", 28, bold=True)
     font_sub   = pygame.font.SysFont("monospace", 12)
     font_name  = pygame.font.SysFont("monospace", 13, bold=True)
@@ -1279,6 +1285,7 @@ def main() -> None:
     font_float = pygame.font.SysFont("monospace", 14, bold=True)
 
     player_color = run_character_select(screen, clock)
+    print(f"[startup] player.color = {player_color}")
 
     tiles      = build_tiles(LEVEL)
     player     = Player(80.0, 100.0, color=player_color)
