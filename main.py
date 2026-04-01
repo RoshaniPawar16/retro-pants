@@ -4,7 +4,7 @@ import pygame
 import sys
 import math
 import random
-from draw_player import draw_fancy_player, draw_star_kid_preview as draw_ghost_preview
+from draw_player import draw_fancy_player
 
 # ── Display ──────────────────────────────────────────────────────────────────
 WIDTH, HEIGHT = 960, 540
@@ -1216,9 +1216,9 @@ def run_character_select(screen: pygame.Surface,
                     pygame.draw.circle(glow, (*col, a), (glow_r, glow_r), r)
                 screen.blit(glow, (ghost_cx - glow_r, ghost_cy - glow_r + 5))
 
-            # Ghost itself
+            # Ghost itself — preview disabled while character select is skipped
             g_surf = pygame.Surface((160, 130), pygame.SRCALPHA)
-            draw_ghost_preview(g_surf, 80, 65, col, scale, anim)
+            # draw_ghost_preview(g_surf, 80, 65, col, scale, anim)
 
             if not is_sel:
                 mask = pygame.Surface((160, 130), pygame.SRCALPHA)

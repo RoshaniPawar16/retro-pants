@@ -1,586 +1,392 @@
 """
-STAR KID character renderer for retro-pants.
-Drop-in replacement — same public API: draw_fancy_player(surf, player, cam_x)
+retro-pants — draw_player.py  (v4 — RPG Adventurer, Sea of Stars chibi)
 
-Reads from player: .x .y .vx .vy .facing .state .anim_frame
-                   .land_squash  .pos_history  .color
+Reference: dark structured hair, warm peach skin, tan tunic over cream shirt,
+brown pants, dark leather boots, large teal eyes. ~44px tall total.
+
+Integration (unchanged):
+  from draw_player import draw_fancy_player
+
+  Player.__init__:
+      self.pos_history = []
+      self.land_squash = 0
+
+  Player.update() end:
+      self.pos_history.insert(0, (int(self.x), int(self.y)))
+      if len(self.pos_history) > 8: self.pos_history.pop()
+      if self.land_squash > 0: self.land_squash -= 1
+
+  Player._resolve_y() after on_ground=True:
+      if self.vy > 4: self.land_squash = 7
+
+  Player.draw():
+      def draw(self, surf, cam_x):
+          draw_fancy_player(surf, self, cam_x)
 """
 
 import pygame
 import math
 
-# ── Fixed body colors ──────────────────────────────────────────────────────────
-C_BODY    = (232, 224, 240)   # #E8E0F0  soft warm white / lavender
-C_SHADE   = (200, 192, 220)   # #C8C0DC  head left-side crescent shading
-C_LEGS    = (208, 200, 232)   # #D0C8E8  leg fill
-C_FEET    = ( 42,  26,  94)   # #2A1A5E  foot fill
-C_IRIS    = ( 42,  26,  94)   # #2A1A5E  deep indigo iris
-C_PUPIL   = ( 10,   4,  16)   # #0A0410  near-black pupil
-C_OUTLINE = ( 26,  10,  46)   # #1A0A2E  Sea of Stars dark purple
-C_BLUSH   = (255, 176, 192)   # #FFB0C0  landing blush
+# ── Palette ───────────────────────────────────────────────────────────────────
+OUTLINE     = (20,  12,   5)    # very dark brown — never pure black
+SKIN        = (240, 200, 165)   # warm peach
+SKIN_SHADE  = (210, 168, 130)   # cheek shadow
+HAIR        = ( 55,  32,  12)   # dark brown hair
+HAIR_MID    = ( 80,  50,  20)   # hair midtone
+HAIR_HI     = (110,  72,  30)   # hair highlight streak
+EYE_WHITE   = (255, 255, 255)
+EYE_IRIS    = ( 35, 155, 140)   # teal iris
+EYE_PUPIL   = ( 10,  50,  45)   # deep teal pupil
+EYE_GLINT   = (255, 255, 255)
+BLUSH       = (230, 130, 110)
+TUNIC       = (180, 145,  90)   # tan/brown tunic
+TUNIC_DARK  = (140, 105,  60)   # tunic shadow
+TUNIC_HI    = (215, 185, 130)   # tunic highlight
+SHIRT       = (235, 225, 200)   # cream undershirt (visible at collar/cuffs)
+BELT        = ( 65,  40,  18)   # dark leather belt
+BELT_BUCKLE = (200, 170,  60)   # brass buckle
+PANTS       = ( 95,  68,  38)   # medium brown pants
+PANTS_DARK  = ( 68,  48,  25)   # pants shadow
+BOOT        = ( 50,  30,  12)   # dark leather boots
+BOOT_SOLE   = ( 35,  20,   8)   # sole edge
+BOOT_HI     = ( 80,  52,  25)   # boot highlight
 
 
-# ── Eyes ───────────────────────────────────────────────────────────────────────
+def draw_fancy_player(surf, player, cam_x):
+    px    = int(player.x) - cam_x
+    py    = int(player.y)
+    f     = player.facing
+    s     = player.state
+    vx    = player.vx
+    vy    = player.vy
+    fr    = player.anim_frame
+    ticks = pygame.time.get_ticks()
 
-def _draw_star_eyes(surf: pygame.Surface,
-                    cx: int, cy: int,
-                    hw: int, hh: int,
-                    f: int, s: str,
-                    vy: float,
-                    land_squash: int,
-                    t_ms: int,
-                    speed: float) -> None:
-    """Sea of Stars style expressive eyes on the head circle."""
-    is_jump = (s == "jump" or vy < -3)
-    is_fall = (s == "fall" or vy > 4)
-    is_fast = speed > 6 and not is_jump
-    is_run  = speed > 2 and not is_jump and not is_fall
+    # Character anchor — feet center
+    fx = px + 11
+    fy = py + 30
 
-    ey   = cy - 2
-    ex_l = cx - 6
-    ex_r = cx + 6
-
-    # Landing: happy squint (lower half of eye oval only)
-    if land_squash > 3:
-        for ex in (ex_l, ex_r):
-            sq = pygame.Surface((14, 12), pygame.SRCALPHA)
-            pygame.draw.ellipse(sq, (255, 255, 255, 255), (0, 0, 14, 12))
-            surf.blit(sq, (ex - 7, ey - 3))
-        return
-
-    # Blink
-    if s == "idle" and (t_ms % 3000) < 100:
-        for ex in (ex_l, ex_r):
-            pygame.draw.rect(surf, (255, 255, 255), (ex - 5, ey - 1, 10, 3))
-        return
-
-    # Eye dimensions per state
-    if is_jump:
-        ew, eh = 11, 14
-    elif is_fast:
-        ew, eh = 12, 7
-    elif is_run:
-        ew, eh = 12, 9
+    # ── Squash / stretch ──────────────────────────────────────────────────────
+    sq = getattr(player, 'land_squash', 0)
+    if sq > 0:
+        t = sq / 7.0
+        head_w, head_h, body_h = int(22 + 6*t), int(20 - 3*t), int(14 - 3*t)
+    elif s == "jump" and vy < -3:
+        head_w, head_h, body_h = 20, 23, 11
+    elif s == "fall" and vy > 4:
+        head_w, head_h, body_h = 24, 18, 15
     else:
-        ew, eh = 10, 12
+        head_w, head_h, body_h = 22, 20, 14
 
-    # Pupil offsets
-    if is_jump:
-        pdx, pdy = 0, -3
-    elif is_fall:
-        pdx, pdy = 0, 3
-    elif is_fast or is_run:
-        pdx, pdy = f * 4, 0
-    elif s == "idle":
-        pdx = int(math.sin(t_ms * 0.002) * 1.5)
+    # Idle bob
+    bob  = int(math.sin(ticks * 0.003) * 2) if abs(vx) < 0.5 else 0
+    # Lean — subtle forward tilt when running
+    lean = 0
+    if s in ("run", "skid") and abs(vx) > 2:
+        lean = int(f * min(abs(vx) * 0.6, 5))
+
+    # ── Layout (bottom up) ────────────────────────────────────────────────────
+    boot_y  = fy + bob - 8
+    body_y  = boot_y - body_h
+    body_x  = fx - 9 + lean
+    head_cx = fx + lean
+    head_cy = body_y - head_h // 2
+
+    # ── Shadow ────────────────────────────────────────────────────────────────
+    sw = 30 if sq == 0 else 38
+    _aellipse(surf, (5, 3, 1, 55), fx - sw//2, fy - 2, sw, 5)
+
+    # ── Boots ─────────────────────────────────────────────────────────────────
+    _draw_boots(surf, fx, boot_y, f, s, fr, bob, lean)
+
+    # ── Legs / pants ──────────────────────────────────────────────────────────
+    _draw_legs(surf, fx, boot_y, body_y, f, s, fr, bob, lean)
+
+    # ── Body: tunic ───────────────────────────────────────────────────────────
+    _draw_body(surf, body_x, body_y, body_h, lean, head_cx)
+
+    # ── Head ──────────────────────────────────────────────────────────────────
+    hx = head_cx - head_w // 2
+    hy = head_cy - head_h // 2
+
+    # Drop shadow
+    pygame.draw.ellipse(surf, OUTLINE, (hx+2, hy+2, head_w, head_h))
+    # Skin
+    pygame.draw.ellipse(surf, SKIN,    (hx,   hy,   head_w, head_h))
+    # Side shading (left side for depth)
+    shade_surf = pygame.Surface((head_w // 2, head_h), pygame.SRCALPHA)
+    full_surf  = pygame.Surface((head_w, head_h), pygame.SRCALPHA)
+    pygame.draw.ellipse(full_surf, (*SKIN_SHADE, 70), (0, 0, head_w, head_h))
+    shade_surf.blit(full_surf, (0, 0))
+    surf.blit(shade_surf, (hx, hy))
+    # Outline
+    pygame.draw.ellipse(surf, OUTLINE, (hx, hy, head_w, head_h), 2)
+
+    # ── Hair ──────────────────────────────────────────────────────────────────
+    _draw_hair(surf, head_cx, hx, hy, head_w, head_h, f, s, vx, ticks)
+
+    # ── Collar: cream shirt visible above tunic ────────────────────────────────
+    collar_y = head_cy + head_h // 2 - 2
+    pygame.draw.ellipse(surf, OUTLINE, (head_cx - 7, collar_y,     14, 7))
+    pygame.draw.ellipse(surf, SHIRT,   (head_cx - 6, collar_y + 1, 12, 5))
+
+    # ── Eyes ──────────────────────────────────────────────────────────────────
+    _draw_eyes(surf, head_cx, head_cy, head_w, head_h,
+               f, s, vx, vy, player, ticks)
+
+
+def _draw_boots(surf, fx, boot_y, f, s, fr, bob, lean):
+    """Dark leather boots — chunky, squared toe."""
+    if s in ("run", "skid"):
+        off = [
+            [(-7, 0), (5, -3)],
+            [(-6, 0), (4,  0)],
+            [(-7,-3), (5,  0)],
+            [(-6, 0), (4,  0)],
+        ][fr % 4]
+    elif s == "jump":
+        off = [(-8, -4), (6, -4)]
+    elif s == "fall":
+        off = [(-7,  3), (5,  3)]
+    else:
+        off = [(-7,  0), (5,  0)]
+
+    for bx_off, by_off in off:
+        bx = fx + bx_off + lean - 4
+        by = boot_y + by_off + bob
+        # Sole edge
+        pygame.draw.rect(surf, BOOT_SOLE, (bx - 1, by + 6, 12, 3), border_radius=2)
+        # Boot shadow
+        pygame.draw.rect(surf, OUTLINE,   (bx + 1, by + 1, 10, 8), border_radius=3)
+        # Boot fill
+        pygame.draw.rect(surf, BOOT,      (bx,     by,     10, 8), border_radius=3)
+        # Boot highlight
+        pygame.draw.rect(surf, BOOT_HI,   (bx + 2, by + 1,  4, 2), border_radius=1)
+        pygame.draw.rect(surf, OUTLINE,   (bx,     by,     10, 8), border_radius=3, width=1)
+
+
+def _draw_legs(surf, fx, boot_y, body_y, f, s, fr, bob, lean):
+    """Short chunky pants between body and boots."""
+    leg_h = max(body_y - boot_y + 2, 4)
+    if s in ("run", "skid"):
+        off = [
+            [(-6, 0), (4, -2)],
+            [(-5, 0), (3,  0)],
+            [(-6,-2), (4,  0)],
+            [(-5, 0), (3,  0)],
+        ][fr % 4]
+    else:
+        off = [(-6, 0), (4, 0)]
+
+    for lx_off, ly_off in off:
+        lx = fx + lx_off + lean - 3
+        ly = boot_y + ly_off + bob - leg_h
+        # Shadow
+        pygame.draw.rect(surf, OUTLINE,    (lx + 1, ly + 1, 8, leg_h + 2), border_radius=2)
+        # Pants fill
+        pygame.draw.rect(surf, PANTS,      (lx,     ly,     8, leg_h + 2), border_radius=2)
+        # Inner shadow on pants
+        pygame.draw.rect(surf, PANTS_DARK, (lx,     ly + 2, 3, leg_h - 2), border_radius=1)
+        pygame.draw.rect(surf, OUTLINE,    (lx,     ly,     8, leg_h + 2), border_radius=2, width=1)
+
+
+def _draw_body(surf, body_x, body_y, body_h, lean, cx):
+    """Tan tunic with cream shirt at edges, dark belt at waist."""
+    bw = 18
+
+    # Shadow
+    pygame.draw.rect(surf, OUTLINE,    (body_x + 2, body_y + 2, bw,     body_h),     border_radius=4)
+    # Main tunic
+    pygame.draw.rect(surf, TUNIC,      (body_x,     body_y,     bw,     body_h),     border_radius=4)
+    # Left-side shadow strip on tunic
+    pygame.draw.rect(surf, TUNIC_DARK, (body_x,     body_y + 2, bw // 3, body_h - 4), border_radius=2)
+    # Highlight on right shoulder area
+    pygame.draw.rect(surf, TUNIC_HI,   (body_x + bw // 2, body_y + 1, bw // 3, body_h // 3), border_radius=2)
+    # Outline
+    pygame.draw.rect(surf, OUTLINE,    (body_x,     body_y,     bw,     body_h),     border_radius=4, width=2)
+
+    # Belt — 3px stripe across middle of body
+    belt_y = body_y + body_h // 2 - 1
+    pygame.draw.rect(surf, BELT,       (body_x + 1, belt_y, bw - 2, 3))
+    # Belt buckle — small brass square at center
+    bk_x = cx - 3
+    pygame.draw.rect(surf, OUTLINE,    (bk_x,       belt_y - 1, 6, 5))
+    pygame.draw.rect(surf, BELT_BUCKLE,(bk_x + 1,   belt_y,     4, 3))
+
+
+def _draw_hair(surf, cx, hx, hy, hw, hh, f, s, vx, ticks):
+    """
+    Structured dark-brown hair:
+      - Full cap covering top + back of head
+      - Side pieces framing the face
+      - A small highlight streak
+      - One short tuft at front for character
+    """
+    # ── Full hair cap (covers top half of head ellipse) ───────────────────────
+    cap_rect = (hx - 1, hy - 1, hw + 2, hh // 2 + 6)
+    # Shadow cap slightly offset
+    shadow_cap = pygame.Surface((cap_rect[2], cap_rect[3] + 3), pygame.SRCALPHA)
+    pygame.draw.ellipse(shadow_cap, (*OUTLINE, 200),
+                        (0, 0, cap_rect[2], cap_rect[3] + 3))
+    surf.blit(shadow_cap, (cap_rect[0] + 1, cap_rect[1] + 1))
+    # Main cap fill
+    cap_surf = pygame.Surface((cap_rect[2], cap_rect[3] + 3), pygame.SRCALPHA)
+    pygame.draw.ellipse(cap_surf, (*HAIR, 255),
+                        (0, 0, cap_rect[2], cap_rect[3] + 3))
+    surf.blit(cap_surf, (cap_rect[0], cap_rect[1]))
+
+    # Midtone band across cap
+    mid_surf = pygame.Surface((hw - 4, 5), pygame.SRCALPHA)
+    pygame.draw.rect(mid_surf, (*HAIR_MID, 180), (0, 0, hw - 4, 5), border_radius=2)
+    surf.blit(mid_surf, (hx + 2, hy + 3))
+
+    # Highlight streak (slightly right of center, angled)
+    hi_pts = [
+        (cx + 2, hy + 1),
+        (cx + 7, hy + 4),
+        (cx + 5, hy + 5),
+        (cx,     hy + 2),
+    ]
+    pygame.draw.polygon(surf, HAIR_HI, hi_pts)
+
+    # ── Side pieces — frame the face ─────────────────────────────────────────
+    # Left side piece
+    pygame.draw.rect(surf, OUTLINE,
+                     (hx - 1, hy + hh // 2 - 4, 5, 9), border_radius=2)
+    pygame.draw.rect(surf, HAIR,
+                     (hx,     hy + hh // 2 - 3, 4, 8), border_radius=2)
+
+    # Right side piece (shorter — more of the face visible)
+    pygame.draw.rect(surf, OUTLINE,
+                     (hx + hw - 5, hy + hh // 2 - 4, 5, 7), border_radius=2)
+    pygame.draw.rect(surf, HAIR,
+                     (hx + hw - 5, hy + hh // 2 - 3, 4, 6), border_radius=2)
+
+    # ── Front tuft — one small spike at forehead ──────────────────────────────
+    speed = abs(vx)
+    # Tuft leans back when running
+    if s in ("run", "skid") and speed > 2:
+        tx = cx + f * int(min(speed * 1.5, 8))
+    else:
+        tx = cx + int(math.sin(ticks * 0.0015) * 1.5)
+
+    tuft_pts = [
+        (tx - 3, hy + 3),
+        (tx,     hy - 6),
+        (tx + 3, hy + 3),
+    ]
+    pygame.draw.polygon(surf, OUTLINE,  [(x+1, y+1) for x, y in tuft_pts])
+    pygame.draw.polygon(surf, HAIR_MID, tuft_pts)
+    pygame.draw.polygon(surf, OUTLINE,  tuft_pts, 1)
+
+    # Cap outline on top
+    pygame.draw.arc(surf, OUTLINE,
+                    (hx - 1, hy - 1, hw + 2, hh),
+                    math.pi, 2 * math.pi, 2)
+
+
+def _draw_eyes(surf, cx, cy, hw, hh, f, s, vx, vy, player, ticks):
+    speed = abs(vx)
+    le_x = cx - 5
+    re_x = cx + 5
+    e_y  = cy - 1
+
+    ew, eh = 7, 9   # base: tall anime eye
+
+    # Happy squint on land
+    sq = getattr(player, 'land_squash', 0)
+    if sq > 3:
+        for ex in (le_x, re_x):
+            pygame.draw.ellipse(surf, EYE_WHITE, (ex - 4, e_y - 2, 9, 7))
+            pygame.draw.arc(surf, OUTLINE, (ex - 4, e_y - 2, 9, 7), 0, math.pi, 2)
+        pygame.draw.arc(surf, OUTLINE, (cx - 4, e_y + 4, 8, 4), math.pi, 2 * math.pi, 2)
+        _blush(surf, le_x, re_x, e_y, 6, 170)
+        return
+
+    # State-based shape
+    if s == "jump" and vy < -3:
+        ew, eh = 7, 11
+        pdx, pdy = 0, -2
+    elif s == "fall" and vy > 4:
+        ew, eh = 8, 8
+        pdx, pdy = 0, 2
+    elif speed > 5:
+        ew, eh = 9, 6   # fierce squint
+        pdx, pdy = f * 3, 0
+    elif speed > 2:
+        pdx, pdy = f * 2, 0
+    else:
+        pdx = int(math.sin(ticks * 0.0015) * 1.5)
         pdy = 0
+        # Blink
+        if (ticks // 16) % 220 < 5:
+            for ex in (le_x, re_x):
+                pygame.draw.ellipse(surf, EYE_WHITE, (ex - ew // 2, e_y - 2, ew, 3))
+            return
+
+    for ex in (le_x, re_x):
+        # Outline shell
+        pygame.draw.ellipse(surf, OUTLINE,
+                            (ex - ew // 2 - 1, e_y - eh // 2 - 1, ew + 2, eh + 2))
+        # White
+        pygame.draw.ellipse(surf, EYE_WHITE,
+                            (ex - ew // 2, e_y - eh // 2, ew, eh))
+        # Iris
+        ix = max(ex - ew // 2 + 2, min(ex + ew // 2 - 2, ex + pdx))
+        iy = max(e_y - eh // 2 + 2, min(e_y + eh // 2 - 2, e_y + pdy))
+        pygame.draw.circle(surf, EYE_IRIS,  (ix, iy), 3)
+        pygame.draw.circle(surf, EYE_PUPIL, (ix, iy), 2)
+        # Two glints — makes eyes feel alive
+        pygame.draw.circle(surf, EYE_GLINT, (ix + 2, iy - 2), 2)
+        pygame.draw.circle(surf, EYE_GLINT, (ix + 3, iy + 1), 1)
+        # Top lash — thick arc
+        pygame.draw.arc(surf, OUTLINE,
+                        (ex - ew // 2 - 1, e_y - eh // 2 - 1, ew + 2, eh + 2),
+                        math.pi * 0.15, math.pi * 0.85, 2)
+
+    # Brows — dark brown, expressive
+    brow_y = e_y - eh // 2 - 4
+    if speed > 5 and s == "run":
+        pygame.draw.line(surf, HAIR, (le_x - 4, brow_y - 2), (le_x + 3, brow_y), 2)
+        pygame.draw.line(surf, HAIR, (re_x - 3, brow_y),     (re_x + 4, brow_y - 2), 2)
+    elif s == "jump" and vy < -3:
+        for ex in (le_x, re_x):
+            pygame.draw.arc(surf, HAIR,
+                            (ex - 5, brow_y - 4, 10, 6),
+                            math.pi, 2 * math.pi, 2)
+    elif s == "fall" and vy > 5:
+        for ex in (le_x, re_x):
+            pygame.draw.arc(surf, HAIR,
+                            (ex - 5, brow_y - 1, 10, 5), 0, math.pi, 2)
     else:
-        pdx, pdy = 0, 0
-
-    for ex in (ex_l, ex_r):
-        pygame.draw.ellipse(surf, (255, 255, 255),
-                            (ex - ew // 2, ey - eh // 2, ew, eh))
-        pygame.draw.ellipse(surf, C_OUTLINE,
-                            (ex - ew // 2, ey - eh // 2, ew, eh), 2)
-        pygame.draw.circle(surf, C_IRIS,  (ex + pdx, ey + pdy), 5)
-        pygame.draw.circle(surf, C_PUPIL, (ex + pdx, ey + pdy), 3)
-        pygame.draw.circle(surf, (255, 255, 255), (ex + pdx + 2, ey + pdy - 2), 2)
-        pygame.draw.circle(surf, (255, 255, 255), (ex + pdx + 3, ey + pdy + 1), 1)
-        # Eyelash arc above eye
-        el_rect = pygame.Rect(ex - ew // 2 - 1, ey - eh // 2 - 5, ew + 2, 8)
-        pygame.draw.arc(surf, C_OUTLINE, el_rect,
-                        math.radians(30), math.radians(150), 2)
-
-
-# ── Star tips ─────────────────────────────────────────────────────────────────
-
-def _draw_star_tips(surf: pygame.Surface,
-                    cx: int, cy: int, hh: int,
-                    f: int,
-                    is_jump: bool, is_running: bool,
-                    is_fast: bool, is_landing: bool,
-                    land_squash: int) -> None:
-    """Two pointed star-tip ears at the crown of the head."""
-    for side in (-1, 1):
-        tx = cx + side * 7
-
-        if is_landing and land_squash > 0:
-            # Flatten sideways during squash
-            pts = [
-                (tx - side * 2, cy - hh),
-                (tx + side * 5, cy - hh - 2),
-                (tx - side * 2, cy - hh - 4),
-            ]
-        elif is_fast:
-            # Fully flat, streaming back
-            pts = [
-                (tx,          cy - hh),
-                (tx - f * 6,  cy - hh - 2),
-                (tx,          cy - hh - 4),
-            ]
-        elif is_running:
-            # Tilted back ~30 degrees
-            pts = [
-                (tx,          cy - hh),
-                (tx - f * 3,  cy - hh - 8),
-                (tx - f * 1,  cy - hh),
-            ]
-        elif is_jump:
-            # Pointing straight up (excited)
-            pts = [
-                (tx - 2, cy - hh),
-                (tx,     cy - hh - 9),
-                (tx + 2, cy - hh),
-            ]
-        else:
-            # Normal
-            pts = [
-                (tx - 2, cy - hh),
-                (tx,     cy - hh - 8),
-                (tx + 2, cy - hh),
-            ]
-
-        pygame.draw.polygon(surf, C_BODY, pts)
-        pygame.draw.polygon(surf, C_OUTLINE, pts, 2)
-
-
-# ── Expression ────────────────────────────────────────────────────────────────
-
-def _draw_expression(surf: pygame.Surface,
-                     cx: int, cy: int,
-                     hh: int,
-                     f: int, s: str,
-                     vy: float,
-                     is_jump: bool, is_fall: bool,
-                     is_landing: bool,
-                     is_running: bool, is_fast: bool,
-                     t_ms: int) -> None:
-    """Mouth, brows, and landing blush."""
-    mouth_y = cy + hh - 4
-
-    if is_landing:
-        bk = pygame.Surface((40, 16), pygame.SRCALPHA)
-        pygame.draw.circle(bk, (*C_BLUSH, 100), ( 7, 8), 6)
-        pygame.draw.circle(bk, (*C_BLUSH, 100), (33, 8), 6)
-        surf.blit(bk, (cx - 20, cy + 2))
-        return
-
-    if is_running or is_fast:
-        pygame.draw.line(surf, C_OUTLINE,
-                         (cx - 4, mouth_y), (cx + 4, mouth_y), 2)
-        return
-
-    if is_fall:
-        frown_r = pygame.Rect(cx - 5, mouth_y - 2, 10, 7)
-        pygame.draw.arc(surf, C_OUTLINE, frown_r, math.pi, 2 * math.pi, 2)
-        for side in (-1, 1):
-            bx  = cx + side * 6
-            bry = cy - 4
-            pygame.draw.line(surf, C_OUTLINE,
-                             (bx, bry - 2), (bx - side * 4, bry + 1), 2)
-        return
-
-    if is_jump:
-        for side in (-1, 1):
-            bx  = cx + side * 6
-            bry = cy - 5
-            pygame.draw.line(surf, C_OUTLINE,
-                             (bx - 3, bry + 2), (bx + 3, bry - 2), 2)
-        return
-
-    # Idle gentle smile
-    smile_r = pygame.Rect(cx - 5, mouth_y - 3, 10, 7)
-    pygame.draw.arc(surf, C_OUTLINE, smile_r,
-                    math.pi + 0.3, 2 * math.pi - 0.3, 2)
-
-
-# ── Speed lines ───────────────────────────────────────────────────────────────
-
-def _draw_speed_lines(surf: pygame.Surface,
-                      cx: int, cy: int, hh: int,
-                      f: int,
-                      player_color: tuple,
-                      t_ms: int) -> None:
-    """Four horizontal speed lines trailing behind at full speed."""
-    line_len = 35
-    char_top = cy - hh - 5
-    char_h   = hh * 2 + 18   # head + body + legs height span
-
-    sp_w = line_len + 10
-    sp_h = char_h + 10
-    sp   = pygame.Surface((sp_w, sp_h), pygame.SRCALPHA)
-
-    for i in range(4):
-        ly  = int((i + 0.5) * char_h / 4) + 5
-        seg = line_len // 3
-        for alpha, width, x0, x1 in (
-            (100, 2, sp_w - seg,     sp_w),
-            ( 60, 1, sp_w - seg * 2, sp_w - seg),
-            ( 25, 1, 0,              sp_w - seg * 2),
-        ):
-            pygame.draw.line(sp, (*player_color, alpha),
-                             (x0, ly), (x1, ly), width)
-
-    if f == 1:
-        surf.blit(sp, (cx - hh - sp_w, char_top - 5))
-    else:
-        surf.blit(pygame.transform.flip(sp, True, False),
-                  (cx + hh, char_top - 5))
-
-
-# ── Scarf trailing tail ───────────────────────────────────────────────────────
-
-def _draw_scarf_tail(surf: pygame.Surface,
-                     cx: int, neck_y: int,
-                     pos_history: list,
-                     player_color: tuple,
-                     cam_x: int,
-                     is_jump: bool) -> None:
-    """Draw the scarf trailing through recent pos_history positions."""
-    if not pos_history:
-        return
-
-    tail_pts = [(cx, neck_y)]
-    for hx, hy in list(pos_history)[:5]:
-        rx = int(hx) - cam_x + 12
-        # neck_y equivalent for that historical position
-        ry = int(hy) + 44 - 8 - 10 - 13 + 13
-        tail_pts.append((rx, ry))
-
-    if len(tail_pts) < 2:
-        return
-
-    sc = pygame.Surface((surf.get_width(), surf.get_height()), pygame.SRCALPHA)
-    for i in range(len(tail_pts) - 1):
-        alpha = max(20, 200 - i * 36)
-        width = max(1, 4 - i)
-        pygame.draw.line(sc, (*player_color, alpha),
-                         tail_pts[i], tail_pts[i + 1], width)
-    surf.blit(sc, (0, 0))
-
-
-# ── Core Star Kid draw ────────────────────────────────────────────────────────
-
-def _draw_star_kid(surf: pygame.Surface,
-                   cx: int, head_cy: int,
-                   f: int, s: str,
-                   fr: int, vx: float, vy: float,
-                   land_squash: int,
-                   player_color: tuple,
-                   t_ms: int) -> None:
-    """
-    Draw Star Kid in draw-order layers. cx/head_cy is the un-bobbed head centre.
-    """
-    speed      = abs(vx)
-    is_jump    = (s == "jump" or vy < -3)
-    is_fall    = (s == "fall" or vy > 4)
-    is_running = speed > 2 and not is_jump and not is_fall
-    is_fast    = speed > 6 and not is_jump and not is_fall
-    is_landing = land_squash > 0
-
-    # Squash / stretch
-    if is_landing:
-        t_sq   = land_squash / 6.0
-        head_w = 13 + int(t_sq * 4)
-        head_h = 13 - int(t_sq * 3)
-        leg_h  = max(4, 8 - int(t_sq * 4))
-    else:
-        head_w = head_h = 13
-        leg_h  = 8
-
-    # Idle bob (2 px)
-    bob = int(math.sin(t_ms * 0.003) * 2) if s == "idle" else 0
-
-    # Running lean: shift head forward
-    hcx = cx + (f * 3 if is_running else 0)
-    hcy = head_cy + bob
-
-    body_top    = hcy + head_h - 2   # slight overlap with head bottom
-    body_bottom = body_top + 10
-
-    # ── 1. Shadow ──────────────────────────────────────────────────────────
-    sh_w = 26 if is_landing else 20
-    sh_h = 3  if is_landing else 5
-    sh_s = pygame.Surface((sh_w + 2, sh_h + 2), pygame.SRCALPHA)
-    pygame.draw.ellipse(sh_s, (10, 4, 16, 50), (0, 0, sh_w, sh_h))
-    surf.blit(sh_s, (hcx - sh_w // 2, body_bottom + leg_h - 1))
-
-    # ── 2. Body ────────────────────────────────────────────────────────────
-    bx = hcx - 7
-    pygame.draw.rect(surf, C_BODY,    (bx, body_top, 14, 10), border_radius=3)
-    pygame.draw.rect(surf, C_OUTLINE, (bx, body_top, 14, 10), 2, border_radius=3)
-
-    # ── 3. Legs + feet ─────────────────────────────────────────────────────
-    walk_frame = (fr // 4) % 2
-
-    for side in (-1, 1):
-        leg_cx = hcx + side * 4
-
-        if is_jump:
-            lx = leg_cx + side * 3
-            ly = body_bottom - 5
-        elif is_fall:
-            lx = leg_cx
-            ly = body_bottom + 4
-        elif is_landing:
-            lx = leg_cx
-            ly = body_bottom
-        elif is_running:
-            forward = (side == 1 and walk_frame == 0) or (side == -1 and walk_frame == 1)
-            lx = leg_cx + (f * 3 if forward else -f * 1)
-            ly = body_bottom - (2 if forward else 0)
-        else:
-            lx = leg_cx
-            ly = body_bottom
-
-        pygame.draw.rect(surf, C_LEGS,
-                         (lx - 3, ly, 6, leg_h), border_radius=3)
-        pygame.draw.rect(surf, C_OUTLINE,
-                         (lx - 3, ly, 6, leg_h), 2, border_radius=3)
-        pygame.draw.ellipse(surf, C_FEET, (lx - 4, ly + leg_h - 2, 8, 4))
-
-    # ── 4. Head ────────────────────────────────────────────────────────────
-    pygame.draw.ellipse(surf, C_BODY,
-                        (hcx - head_w, hcy - head_h, head_w * 2, head_h * 2))
-
-    # Shading crescent: darker half-ellipse on left of head
-    sh = pygame.Surface((head_w * 2, head_h * 2), pygame.SRCALPHA)
-    pygame.draw.ellipse(sh, (*C_SHADE, 80),
-                        (0, head_h // 2, head_w, head_h))
-    surf.blit(sh, (hcx - head_w, hcy - head_h))
-
-    pygame.draw.ellipse(surf, C_OUTLINE,
-                        (hcx - head_w, hcy - head_h, head_w * 2, head_h * 2), 2)
-
-    # ── 5. Scarf neck wrap ─────────────────────────────────────────────────
-    scarf_y = hcy + head_h - 3
-    sc_s = pygame.Surface((20, 10), pygame.SRCALPHA)
-    pygame.draw.ellipse(sc_s, (*player_color, 255), (0, 0, 20, 8))
-    pygame.draw.ellipse(sc_s, (*C_OUTLINE, 255),    (0, 0, 20, 8), 2)
-    surf.blit(sc_s, (hcx - 10, scarf_y))
-
-    # ── 6. Eyes ────────────────────────────────────────────────────────────
-    _draw_star_eyes(surf, hcx, hcy, head_w, head_h,
-                    f, s, vy, land_squash, t_ms, speed)
-
-    # ── 7. Star tips ───────────────────────────────────────────────────────
-    _draw_star_tips(surf, hcx, hcy, head_h,
-                    f, is_jump, is_running, is_fast, is_landing, land_squash)
-
-    # ── 8. Expression ──────────────────────────────────────────────────────
-    _draw_expression(surf, hcx, hcy, head_h,
-                     f, s, vy,
-                     is_jump, is_fall, is_landing,
-                     is_running, is_fast, t_ms)
-
-    # ── 9. Arm nubs (running / jumping) ────────────────────────────────────
-    if is_running or is_jump:
-        arm_y = hcy + head_h + 2
-        if is_jump:
-            for side in (-1, 1):
-                ax = hcx + side * (head_w + 2)
-                pygame.draw.rect(surf, C_BODY,
-                                 (ax - 2, arm_y, 5, 4), border_radius=2)
-                pygame.draw.rect(surf, C_OUTLINE,
-                                 (ax - 2, arm_y, 5, 4), 1, border_radius=2)
-        else:
-            ax_fwd  = hcx + f * (head_w + 2)
-            ax_back = hcx - f * (head_w + 1)
-            for ax, dy in ((ax_fwd, -1), (ax_back, 1)):
-                pygame.draw.rect(surf, C_BODY,
-                                 (ax - 2, arm_y + dy, 5, 4), border_radius=2)
-                pygame.draw.rect(surf, C_OUTLINE,
-                                 (ax - 2, arm_y + dy, 5, 4), 1, border_radius=2)
-
-    # ── 10. Speed lines ────────────────────────────────────────────────────
-    if is_fast:
-        _draw_speed_lines(surf, hcx, hcy, head_h, f, player_color, t_ms)
-
-
-# ── Rolling renderer ───────────────────────────────────────────────────────────
-
-def _draw_rolling(surf: pygame.Surface,
-                  world_x: int, py: int,
-                  cam_x: int,
-                  player_color: tuple,
-                  t_ms: int) -> None:
-    """
-    Render Star Kid spinning during a roll.
-    Draws to a 64×64 offscreen surface then rotates and blits.
-    """
-    size = 64
-    cx = size // 2
-    cy = size // 2 - 4
-    tmp = pygame.Surface((size, size), pygame.SRCALPHA)
-
-    # Head
-    pygame.draw.circle(tmp, C_BODY, (cx, cy), 13)
-    sh = pygame.Surface((26, 26), pygame.SRCALPHA)
-    pygame.draw.ellipse(sh, (*C_SHADE, 80), (0, 6, 13, 13))
-    tmp.blit(sh, (cx - 13, cy - 13))
-    pygame.draw.circle(tmp, C_OUTLINE, (cx, cy), 13, 2)
-
-    # Body
-    pygame.draw.rect(tmp, C_BODY,    (cx - 7, cy + 11, 14, 10), border_radius=3)
-    pygame.draw.rect(tmp, C_OUTLINE, (cx - 7, cy + 11, 14, 10), 2, border_radius=3)
-
-    # Legs
-    for side in (-1, 1):
-        lx = cx + side * 4
-        pygame.draw.rect(tmp, C_LEGS,
-                         (lx - 3, cy + 21, 6, 8), border_radius=3)
-        pygame.draw.rect(tmp, C_OUTLINE,
-                         (lx - 3, cy + 21, 6, 8), 2, border_radius=3)
-        pygame.draw.ellipse(tmp, C_FEET, (lx - 4, cy + 27, 8, 4))
-
-    # Scarf
-    sc_s = pygame.Surface((20, 10), pygame.SRCALPHA)
-    pygame.draw.ellipse(sc_s, (*player_color, 255), (0, 0, 20, 8))
-    pygame.draw.ellipse(sc_s, (*C_OUTLINE, 255),    (0, 0, 20, 8), 2)
-    tmp.blit(sc_s, (cx - 10, cy + 10))
-
-    # Swirl eyes (approximated by two concentric circles)
-    for ex in (cx - 6, cx + 6):
-        ey = cy - 2
-        pygame.draw.circle(tmp, C_OUTLINE, (ex, ey), 4, 2)
-        pygame.draw.circle(tmp, C_OUTLINE, (ex, ey), 2, 1)
-
-    # Star tips (rotate with body — draw upright, rotation handles angle)
-    for side in (-1, 1):
-        tx = cx + side * 7
-        pts = [(tx - 2, cy - 13), (tx, cy - 21), (tx + 2, cy - 13)]
-        pygame.draw.polygon(tmp, C_BODY, pts)
-        pygame.draw.polygon(tmp, C_OUTLINE, pts, 2)
-
-    angle   = (t_ms // 4) % 360
-    rotated = pygame.transform.rotate(tmp, -angle)
-    rw, rh  = rotated.get_size()
-
-    draw_x = world_x - cam_x + 12 - rw // 2
-    draw_y = py + 8 - rh // 2
-    surf.blit(rotated, (draw_x, draw_y))
-
-
-# ── Preview (character select screen) ────────────────────────────────────────
-
-def draw_star_kid_preview(surf: pygame.Surface,
-                          cx: int, cy: int,
-                          color: tuple,
-                          scale: float = 1.0,
-                          anim: int = 0) -> None:
-    """Draw a static, scaled Star Kid centred at (cx, cy). Used on select screen."""
-    r  = max(4, int(13 * scale))
-    bw = max(6, int(14 * scale))
-    bh = max(4, int(10 * scale))
-    lg = max(3, int(8  * scale))
-
-    head_cy  = cy - bh - lg + r
-    body_top = head_cy + r - 2
-
-    # Head
-    pygame.draw.circle(surf, C_BODY,    (cx, head_cy), r)
-    pygame.draw.circle(surf, C_OUTLINE, (cx, head_cy), r, 2)
-
-    # Body
-    pygame.draw.rect(surf, C_BODY,
-                     (cx - bw // 2, body_top, bw, bh), border_radius=3)
-    pygame.draw.rect(surf, C_OUTLINE,
-                     (cx - bw // 2, body_top, bw, bh), 2, border_radius=3)
-
-    # Legs + feet
-    for side in (-1, 1):
-        lx = cx + side * int(4 * scale)
-        pygame.draw.rect(surf, C_LEGS,
-                         (lx - int(3 * scale), body_top + bh,
-                          int(6 * scale), lg), border_radius=2)
-        pygame.draw.rect(surf, C_OUTLINE,
-                         (lx - int(3 * scale), body_top + bh,
-                          int(6 * scale), lg), 2, border_radius=2)
-        pygame.draw.ellipse(surf, C_FEET,
-                            (lx - int(4 * scale), body_top + bh + lg - int(2 * scale),
-                             int(8 * scale), int(4 * scale)))
-
-    # Scarf
-    sc_s = pygame.Surface((int(20 * scale) + 2, 12), pygame.SRCALPHA)
-    sw   = int(20 * scale)
-    sh_  = int(8  * scale)
-    pygame.draw.ellipse(sc_s, (*color, 255),    (0, 0, sw, sh_))
-    pygame.draw.ellipse(sc_s, (*C_OUTLINE, 255), (0, 0, sw, sh_), 2)
-    surf.blit(sc_s, (cx - sw // 2, head_cy + r - int(3 * scale)))
-
-    # Eyes
-    for ex in (cx - int(6 * scale), cx + int(6 * scale)):
-        ey = head_cy - int(2 * scale)
-        ew = max(4, int(10 * scale))
-        eh = max(5, int(12 * scale))
-        pygame.draw.ellipse(surf, (255, 255, 255),
-                            (ex - ew // 2, ey - eh // 2, ew, eh))
-        pygame.draw.ellipse(surf, C_OUTLINE,
-                            (ex - ew // 2, ey - eh // 2, ew, eh), 2)
-        pygame.draw.circle(surf, C_IRIS,  (ex, ey), max(3, int(5 * scale)))
-        pygame.draw.circle(surf, C_PUPIL, (ex, ey), max(2, int(3 * scale)))
-        gr = max(1, int(2 * scale))
-        pygame.draw.circle(surf, (255, 255, 255), (ex + gr, ey - gr), gr)
-
-    # Star tips
-    for side in (-1, 1):
-        tx = cx + side * int(7 * scale)
-        th = int(8 * scale)
-        pts = [
-            (tx - int(2 * scale), head_cy - r),
-            (tx,                  head_cy - r - th),
-            (tx + int(2 * scale), head_cy - r),
-        ]
-        pygame.draw.polygon(surf, C_BODY, pts)
-        pygame.draw.polygon(surf, C_OUTLINE, pts, 2)
+        # Neutral — slight natural arch
+        for ex in (le_x, re_x):
+            pygame.draw.line(surf, HAIR,
+                             (ex - 4, brow_y), (ex + 4, brow_y - 1), 2)
+
+    _blush(surf, le_x, re_x, e_y, 4, 50)
 
     # Idle smile
-    smile_r = pygame.Rect(cx - int(5 * scale),
-                          head_cy + r - int(6 * scale),
-                          int(10 * scale), int(7 * scale))
-    pygame.draw.arc(surf, C_OUTLINE, smile_r,
-                    math.pi + 0.3, 2 * math.pi - 0.3, 2)
+    if abs(vx) < 1 and s not in ("jump", "fall", "roll"):
+        pygame.draw.arc(surf, OUTLINE,
+                        (cx - 4, e_y + eh // 2, 8, 4), math.pi, 2 * math.pi, 1)
 
 
-# ── Main entry point ──────────────────────────────────────────────────────────
+def _blush(surf, le_x, re_x, e_y, r, a):
+    for ex in (le_x, re_x):
+        off = -8 if ex < (le_x + re_x) // 2 else 8
+        _acircle(surf, (*BLUSH, a), ex + off, e_y + 5, r)
 
-def draw_fancy_player(surf: pygame.Surface,
-                      player: object,
-                      cam_x: int) -> None:
-    """
-    Render the player as Star Kid — a small celestial creature with a flowing scarf.
-    Called every frame by Player.draw(surf, cam_x) in main.py.
-    """
-    px = int(player.x) - cam_x    # type: ignore[attr-defined]
-    py = int(player.y)             # type: ignore[attr-defined]
-    f  = player.facing             # type: ignore[attr-defined]
-    s  = player.state              # type: ignore[attr-defined]
-    fr = player.anim_frame         # type: ignore[attr-defined]
-    vx = player.vx                 # type: ignore[attr-defined]
-    vy = player.vy                 # type: ignore[attr-defined]
 
-    land_squash  = getattr(player, 'land_squash',  0)
-    pos_history  = getattr(player, 'pos_history',  [])
-    player_color = getattr(player, 'color',        (180, 100, 220))
-    t_ms         = pygame.time.get_ticks()
+# ── Alpha helpers ─────────────────────────────────────────────────────────────
 
-    # Rolling: separate rotated-surface renderer
-    if s == "roll":
-        _draw_rolling(surf, int(player.x), py, cam_x, player_color, t_ms)
-        return
+def _aellipse(surf, col, x, y, w, h):
+    s = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.ellipse(s, col, (0, 0, w, h))
+    surf.blit(s, (x, y))
 
-    # Head centre: px/py is sprite top-left; character is 24px wide, 44px tall
-    # Layout from feet up: legs(8) + body(10) + head_radius(13) = 31px
-    cx      = px + 12
-    feet_y  = py + 44
-    head_cy = feet_y - 8 - 10 - 13   # un-bobbed head centre y
-    neck_y  = head_cy + 13            # bottom of head circle = scarf neck
 
-    # Scarf trailing tail — drawn behind everything
-    is_jump = (s == "jump" or vy < -3)
-    _draw_scarf_tail(surf, cx, neck_y, pos_history, player_color, cam_x, is_jump)
-
-    # Character
-    _draw_star_kid(surf, cx, head_cy,
-                   f, s, fr, vx, vy,
-                   land_squash, player_color, t_ms)
+def _acircle(surf, col, cx, cy, r):
+    s = pygame.Surface((r * 2 + 2, r * 2 + 2), pygame.SRCALPHA)
+    pygame.draw.circle(s, col, (r + 1, r + 1), r)
+    surf.blit(s, (cx - r - 1, cy - r - 1))
