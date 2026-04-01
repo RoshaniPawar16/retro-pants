@@ -4,7 +4,7 @@ import pygame
 import sys
 import math
 import random
-from draw_player import draw_fancy_player
+from draw_valere import draw_fancy_player
 
 # ── Display ──────────────────────────────────────────────────────────────────
 WIDTH, HEIGHT = 960, 540
