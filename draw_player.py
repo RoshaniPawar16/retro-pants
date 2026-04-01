@@ -1,55 +1,39 @@
 """
-retro-pants — draw_player.py  (v4 — RPG Adventurer, Sea of Stars chibi)
+retro-pants — draw_player.py  (v5 — RPG Adventurer, fixed)
 
-Reference: dark structured hair, warm peach skin, tan tunic over cream shirt,
-brown pants, dark leather boots, large teal eyes. ~44px tall total.
+Reference: Sea of Stars chibi — large skin face, dark hair ONLY on crown,
+blue jacket, cream shirt collar, brown pants, dark boots, teal eyes.
 
 Integration (unchanged):
   from draw_player import draw_fancy_player
-
-  Player.__init__:
-      self.pos_history = []
-      self.land_squash = 0
-
-  Player.update() end:
-      self.pos_history.insert(0, (int(self.x), int(self.y)))
-      if len(self.pos_history) > 8: self.pos_history.pop()
-      if self.land_squash > 0: self.land_squash -= 1
-
-  Player._resolve_y() after on_ground=True:
-      if self.vy > 4: self.land_squash = 7
-
-  Player.draw():
-      def draw(self, surf, cam_x):
-          draw_fancy_player(surf, self, cam_x)
 """
 
 import pygame
 import math
 
 # ── Palette ───────────────────────────────────────────────────────────────────
-OUTLINE     = (20,  12,   5)    # very dark brown — never pure black
-SKIN        = (240, 200, 165)   # warm peach
-SKIN_SHADE  = (210, 168, 130)   # cheek shadow
-HAIR        = ( 55,  32,  12)   # dark brown hair
-HAIR_MID    = ( 80,  50,  20)   # hair midtone
-HAIR_HI     = (110,  72,  30)   # hair highlight streak
+OUTLINE     = (15,   8,   3)    # near-black brown outline
+SKIN        = (238, 195, 154)   # warm peach — face dominates
+SKIN_SH     = (205, 160, 115)   # face shadow (left side)
+HAIR        = ( 48,  28,   8)   # dark brown
+HAIR_MID    = ( 75,  48,  18)   # hair midtone
+HAIR_HI     = (115,  78,  35)   # highlight streak
 EYE_WHITE   = (255, 255, 255)
-EYE_IRIS    = ( 35, 155, 140)   # teal iris
-EYE_PUPIL   = ( 10,  50,  45)   # deep teal pupil
+EYE_IRIS    = ( 30, 148, 136)   # teal
+EYE_PUPIL   = (  8,  45,  42)
 EYE_GLINT   = (255, 255, 255)
-BLUSH       = (230, 130, 110)
-TUNIC       = (180, 145,  90)   # tan/brown tunic
-TUNIC_DARK  = (140, 105,  60)   # tunic shadow
-TUNIC_HI    = (215, 185, 130)   # tunic highlight
-SHIRT       = (235, 225, 200)   # cream undershirt (visible at collar/cuffs)
-BELT        = ( 65,  40,  18)   # dark leather belt
-BELT_BUCKLE = (200, 170,  60)   # brass buckle
-PANTS       = ( 95,  68,  38)   # medium brown pants
-PANTS_DARK  = ( 68,  48,  25)   # pants shadow
-BOOT        = ( 50,  30,  12)   # dark leather boots
-BOOT_SOLE   = ( 35,  20,   8)   # sole edge
-BOOT_HI     = ( 80,  52,  25)   # boot highlight
+BLUSH       = (220, 115,  95)
+SHIRT       = (235, 228, 210)   # cream shirt (collar + cuffs)
+JACKET      = ( 60,  85, 145)   # blue jacket — breaks the brown monotony
+JACKET_SH   = ( 40,  58, 105)   # jacket shadow
+JACKET_HI   = ( 90, 125, 190)   # jacket highlight
+BELT        = ( 50,  30,  10)
+BUCKLE      = (195, 162,  55)   # brass
+PANTS       = ( 72,  50,  28)   # dark brown pants
+PANTS_SH    = ( 50,  34,  16)
+BOOT        = ( 38,  22,   8)
+BOOT_HI     = ( 65,  42,  20)
+BOOT_SOLE   = ( 25,  14,   4)
 
 
 def draw_fancy_player(surf, player, cam_x):
@@ -62,7 +46,7 @@ def draw_fancy_player(surf, player, cam_x):
     fr    = player.anim_frame
     ticks = pygame.time.get_ticks()
 
-    # Character anchor — feet center
+    # Anchor: feet center
     fx = px + 11
     fy = py + 30
 
@@ -70,65 +54,58 @@ def draw_fancy_player(surf, player, cam_x):
     sq = getattr(player, 'land_squash', 0)
     if sq > 0:
         t = sq / 7.0
-        head_w, head_h, body_h = int(22 + 6*t), int(20 - 3*t), int(14 - 3*t)
+        head_w, head_h, body_h = int(22 + 6*t), int(20 - 3*t), int(13 - 3*t)
     elif s == "jump" and vy < -3:
-        head_w, head_h, body_h = 20, 23, 11
+        head_w, head_h, body_h = 20, 23, 10
     elif s == "fall" and vy > 4:
-        head_w, head_h, body_h = 24, 18, 15
+        head_w, head_h, body_h = 24, 18, 14
     else:
-        head_w, head_h, body_h = 22, 20, 14
+        head_w, head_h, body_h = 22, 20, 13
 
-    # Idle bob
     bob  = int(math.sin(ticks * 0.003) * 2) if abs(vx) < 0.5 else 0
-    # Lean — subtle forward tilt when running
     lean = 0
     if s in ("run", "skid") and abs(vx) > 2:
         lean = int(f * min(abs(vx) * 0.6, 5))
 
-    # ── Layout (bottom up) ────────────────────────────────────────────────────
+    # ── Positions (bottom-up) ─────────────────────────────────────────────────
     boot_y  = fy + bob - 8
-    body_y  = boot_y - body_h
+    body_y  = boot_y - body_h - 6   # 6px gap = legs
     body_x  = fx - 9 + lean
     head_cx = fx + lean
     head_cy = body_y - head_h // 2
 
+    hx = head_cx - head_w // 2
+    hy = head_cy - head_h // 2
+
     # ── Shadow ────────────────────────────────────────────────────────────────
-    sw = 30 if sq == 0 else 38
-    _aellipse(surf, (5, 3, 1, 55), fx - sw//2, fy - 2, sw, 5)
+    _aellipse(surf, (5, 3, 1, 50), fx - 15, fy - 2, 30, 5)
 
     # ── Boots ─────────────────────────────────────────────────────────────────
     _draw_boots(surf, fx, boot_y, f, s, fr, bob, lean)
 
-    # ── Legs / pants ──────────────────────────────────────────────────────────
-    _draw_legs(surf, fx, boot_y, body_y, f, s, fr, bob, lean)
+    # ── Legs (pants stubs) ────────────────────────────────────────────────────
+    _draw_legs(surf, fx, boot_y, body_y + body_h, s, fr, bob, lean)
 
-    # ── Body: tunic ───────────────────────────────────────────────────────────
+    # ── Body (blue jacket) ────────────────────────────────────────────────────
     _draw_body(surf, body_x, body_y, body_h, lean, head_cx)
 
-    # ── Head ──────────────────────────────────────────────────────────────────
-    hx = head_cx - head_w // 2
-    hy = head_cy - head_h // 2
-
+    # ── Head: skin ────────────────────────────────────────────────────────────
     # Drop shadow
-    pygame.draw.ellipse(surf, OUTLINE, (hx+2, hy+2, head_w, head_h))
-    # Skin
-    pygame.draw.ellipse(surf, SKIN,    (hx,   hy,   head_w, head_h))
-    # Side shading (left side for depth)
-    shade_surf = pygame.Surface((head_w // 2, head_h), pygame.SRCALPHA)
-    full_surf  = pygame.Surface((head_w, head_h), pygame.SRCALPHA)
-    pygame.draw.ellipse(full_surf, (*SKIN_SHADE, 70), (0, 0, head_w, head_h))
-    shade_surf.blit(full_surf, (0, 0))
-    surf.blit(shade_surf, (hx, hy))
+    pygame.draw.ellipse(surf, OUTLINE, (hx + 2, hy + 2, head_w, head_h))
+    # Skin fill
+    pygame.draw.ellipse(surf, SKIN,    (hx,     hy,     head_w, head_h))
+    # Left-side face shadow
+    _aellipse(surf, (*SKIN_SH, 60), hx, hy, head_w // 2, head_h)
     # Outline
     pygame.draw.ellipse(surf, OUTLINE, (hx, hy, head_w, head_h), 2)
 
-    # ── Hair ──────────────────────────────────────────────────────────────────
-    _draw_hair(surf, head_cx, hx, hy, head_w, head_h, f, s, vx, ticks)
+    # ── Hair: crown only ──────────────────────────────────────────────────────
+    _draw_hair(surf, head_cx, hx, hy, head_w, f, s, vx, ticks)
 
-    # ── Collar: cream shirt visible above tunic ────────────────────────────────
-    collar_y = head_cy + head_h // 2 - 2
-    pygame.draw.ellipse(surf, OUTLINE, (head_cx - 7, collar_y,     14, 7))
-    pygame.draw.ellipse(surf, SHIRT,   (head_cx - 6, collar_y + 1, 12, 5))
+    # ── Shirt collar (cream) ──────────────────────────────────────────────────
+    collar_y = hy + head_h - 5
+    pygame.draw.ellipse(surf, OUTLINE, (head_cx - 7, collar_y,     14, 8))
+    pygame.draw.ellipse(surf, SHIRT,   (head_cx - 6, collar_y + 1, 12, 6))
 
     # ── Eyes ──────────────────────────────────────────────────────────────────
     _draw_eyes(surf, head_cx, head_cy, head_w, head_h,
@@ -136,7 +113,6 @@ def draw_fancy_player(surf, player, cam_x):
 
 
 def _draw_boots(surf, fx, boot_y, f, s, fr, bob, lean):
-    """Dark leather boots — chunky, squared toe."""
     if s in ("run", "skid"):
         off = [
             [(-7, 0), (5, -3)],
@@ -154,20 +130,17 @@ def _draw_boots(surf, fx, boot_y, f, s, fr, bob, lean):
     for bx_off, by_off in off:
         bx = fx + bx_off + lean - 4
         by = boot_y + by_off + bob
-        # Sole edge
         pygame.draw.rect(surf, BOOT_SOLE, (bx - 1, by + 6, 12, 3), border_radius=2)
-        # Boot shadow
         pygame.draw.rect(surf, OUTLINE,   (bx + 1, by + 1, 10, 8), border_radius=3)
-        # Boot fill
         pygame.draw.rect(surf, BOOT,      (bx,     by,     10, 8), border_radius=3)
-        # Boot highlight
         pygame.draw.rect(surf, BOOT_HI,   (bx + 2, by + 1,  4, 2), border_radius=1)
         pygame.draw.rect(surf, OUTLINE,   (bx,     by,     10, 8), border_radius=3, width=1)
 
 
-def _draw_legs(surf, fx, boot_y, body_y, f, s, fr, bob, lean):
-    """Short chunky pants between body and boots."""
-    leg_h = max(body_y - boot_y + 2, 4)
+def _draw_legs(surf, fx, boot_y, body_bottom, s, fr, bob, lean):
+    """Short pants stubs between body and boots."""
+    leg_h = max(boot_y - body_bottom, 4)
+
     if s in ("run", "skid"):
         off = [
             [(-6, 0), (4, -2)],
@@ -180,130 +153,103 @@ def _draw_legs(surf, fx, boot_y, body_y, f, s, fr, bob, lean):
 
     for lx_off, ly_off in off:
         lx = fx + lx_off + lean - 3
-        ly = boot_y + ly_off + bob - leg_h
-        # Shadow
-        pygame.draw.rect(surf, OUTLINE,    (lx + 1, ly + 1, 8, leg_h + 2), border_radius=2)
-        # Pants fill
-        pygame.draw.rect(surf, PANTS,      (lx,     ly,     8, leg_h + 2), border_radius=2)
-        # Inner shadow on pants
-        pygame.draw.rect(surf, PANTS_DARK, (lx,     ly + 2, 3, leg_h - 2), border_radius=1)
-        pygame.draw.rect(surf, OUTLINE,    (lx,     ly,     8, leg_h + 2), border_radius=2, width=1)
+        ly = body_bottom + ly_off + bob
+        pygame.draw.rect(surf, OUTLINE,  (lx + 1, ly + 1, 8, leg_h), border_radius=2)
+        pygame.draw.rect(surf, PANTS,    (lx,     ly,     8, leg_h), border_radius=2)
+        pygame.draw.rect(surf, PANTS_SH, (lx,     ly + 2, 3, leg_h - 3), border_radius=1)
+        pygame.draw.rect(surf, OUTLINE,  (lx,     ly,     8, leg_h), border_radius=2, width=1)
 
 
 def _draw_body(surf, body_x, body_y, body_h, lean, cx):
-    """Tan tunic with cream shirt at edges, dark belt at waist."""
+    """Blue jacket with cream shirt visible at sides, leather belt."""
     bw = 18
+    # Shadow
+    pygame.draw.rect(surf, OUTLINE,   (body_x + 2, body_y + 2, bw,     body_h),     border_radius=4)
+    # Jacket fill
+    pygame.draw.rect(surf, JACKET,    (body_x,     body_y,     bw,     body_h),     border_radius=4)
+    # Left shadow
+    pygame.draw.rect(surf, JACKET_SH, (body_x,     body_y + 2, bw // 3, body_h - 4), border_radius=2)
+    # Right highlight
+    pygame.draw.rect(surf, JACKET_HI, (body_x + bw // 2, body_y + 1, 5, body_h // 3), border_radius=2)
+    # Cream shirt visible at left and right edges (underlayer peek)
+    pygame.draw.rect(surf, SHIRT,     (body_x - 1, body_y + 2, 3, body_h - 4), border_radius=1)
+    pygame.draw.rect(surf, SHIRT,     (body_x + bw - 2, body_y + 2, 3, body_h - 4), border_radius=1)
+    # Outline
+    pygame.draw.rect(surf, OUTLINE,   (body_x,     body_y,     bw,     body_h),     border_radius=4, width=2)
+    # Belt
+    belt_y = body_y + body_h - 4
+    pygame.draw.rect(surf, BELT,      (body_x + 1, belt_y, bw - 2, 4))
+    # Buckle
+    bk_x = cx - 3
+    pygame.draw.rect(surf, OUTLINE,   (bk_x,     belt_y - 1, 6, 6))
+    pygame.draw.rect(surf, BUCKLE,    (bk_x + 1, belt_y,     4, 4))
+
+
+def _draw_hair(surf, cx, hx, hy, hw, f, s, vx, ticks):
+    """
+    Hair sits ONLY on the crown — top ~7px of the head.
+    The skin face must dominate below it.
+    """
+    # Crown cap: a fat rounded rect covering just the top of the head
+    cap_x = hx - 2
+    cap_y = hy - 3
+    cap_w = hw + 4
+    cap_h = 11   # SMALL — only the crown, not half the head
 
     # Shadow
-    pygame.draw.rect(surf, OUTLINE,    (body_x + 2, body_y + 2, bw,     body_h),     border_radius=4)
-    # Main tunic
-    pygame.draw.rect(surf, TUNIC,      (body_x,     body_y,     bw,     body_h),     border_radius=4)
-    # Left-side shadow strip on tunic
-    pygame.draw.rect(surf, TUNIC_DARK, (body_x,     body_y + 2, bw // 3, body_h - 4), border_radius=2)
-    # Highlight on right shoulder area
-    pygame.draw.rect(surf, TUNIC_HI,   (body_x + bw // 2, body_y + 1, bw // 3, body_h // 3), border_radius=2)
-    # Outline
-    pygame.draw.rect(surf, OUTLINE,    (body_x,     body_y,     bw,     body_h),     border_radius=4, width=2)
+    pygame.draw.rect(surf, OUTLINE, (cap_x + 1, cap_y + 1, cap_w, cap_h), border_radius=6)
+    # Base fill
+    pygame.draw.rect(surf, HAIR,    (cap_x,     cap_y,     cap_w, cap_h), border_radius=6)
+    # Midtone band
+    pygame.draw.rect(surf, HAIR_MID,(cap_x + 3, cap_y + 2, cap_w - 6, 4), border_radius=2)
+    # Highlight streak
+    pygame.draw.rect(surf, HAIR_HI, (cx + 1,   cap_y + 1, 4, 3), border_radius=1)
+    # Outline arc on top only
+    pygame.draw.rect(surf, OUTLINE, (cap_x,     cap_y,     cap_w, cap_h), border_radius=6, width=2)
 
-    # Belt — 3px stripe across middle of body
-    belt_y = body_y + body_h // 2 - 1
-    pygame.draw.rect(surf, BELT,       (body_x + 1, belt_y, bw - 2, 3))
-    # Belt buckle — small brass square at center
-    bk_x = cx - 3
-    pygame.draw.rect(surf, OUTLINE,    (bk_x,       belt_y - 1, 6, 5))
-    pygame.draw.rect(surf, BELT_BUCKLE,(bk_x + 1,   belt_y,     4, 3))
+    # Thin ear-side pieces — just 2px wide, only 4px tall, barely visible
+    # Left
+    pygame.draw.rect(surf, HAIR,   (hx - 1, hy + 6, 3, 5), border_radius=1)
+    pygame.draw.rect(surf, OUTLINE,(hx - 1, hy + 6, 3, 5), border_radius=1, width=1)
+    # Right
+    pygame.draw.rect(surf, HAIR,   (hx + hw - 2, hy + 6, 3, 5), border_radius=1)
+    pygame.draw.rect(surf, OUTLINE,(hx + hw - 2, hy + 6, 3, 5), border_radius=1, width=1)
 
-
-def _draw_hair(surf, cx, hx, hy, hw, hh, f, s, vx, ticks):
-    """
-    Structured dark-brown hair:
-      - Full cap covering top + back of head
-      - Side pieces framing the face
-      - A small highlight streak
-      - One short tuft at front for character
-    """
-    # ── Full hair cap (covers top half of head ellipse) ───────────────────────
-    cap_rect = (hx - 1, hy - 1, hw + 2, hh // 2 + 6)
-    # Shadow cap slightly offset
-    shadow_cap = pygame.Surface((cap_rect[2], cap_rect[3] + 3), pygame.SRCALPHA)
-    pygame.draw.ellipse(shadow_cap, (*OUTLINE, 200),
-                        (0, 0, cap_rect[2], cap_rect[3] + 3))
-    surf.blit(shadow_cap, (cap_rect[0] + 1, cap_rect[1] + 1))
-    # Main cap fill
-    cap_surf = pygame.Surface((cap_rect[2], cap_rect[3] + 3), pygame.SRCALPHA)
-    pygame.draw.ellipse(cap_surf, (*HAIR, 255),
-                        (0, 0, cap_rect[2], cap_rect[3] + 3))
-    surf.blit(cap_surf, (cap_rect[0], cap_rect[1]))
-
-    # Midtone band across cap
-    mid_surf = pygame.Surface((hw - 4, 5), pygame.SRCALPHA)
-    pygame.draw.rect(mid_surf, (*HAIR_MID, 180), (0, 0, hw - 4, 5), border_radius=2)
-    surf.blit(mid_surf, (hx + 2, hy + 3))
-
-    # Highlight streak (slightly right of center, angled)
-    hi_pts = [
-        (cx + 2, hy + 1),
-        (cx + 7, hy + 4),
-        (cx + 5, hy + 5),
-        (cx,     hy + 2),
-    ]
-    pygame.draw.polygon(surf, HAIR_HI, hi_pts)
-
-    # ── Side pieces — frame the face ─────────────────────────────────────────
-    # Left side piece
-    pygame.draw.rect(surf, OUTLINE,
-                     (hx - 1, hy + hh // 2 - 4, 5, 9), border_radius=2)
-    pygame.draw.rect(surf, HAIR,
-                     (hx,     hy + hh // 2 - 3, 4, 8), border_radius=2)
-
-    # Right side piece (shorter — more of the face visible)
-    pygame.draw.rect(surf, OUTLINE,
-                     (hx + hw - 5, hy + hh // 2 - 4, 5, 7), border_radius=2)
-    pygame.draw.rect(surf, HAIR,
-                     (hx + hw - 5, hy + hh // 2 - 3, 4, 6), border_radius=2)
-
-    # ── Front tuft — one small spike at forehead ──────────────────────────────
+    # One small front tuft
     speed = abs(vx)
-    # Tuft leans back when running
     if s in ("run", "skid") and speed > 2:
-        tx = cx + f * int(min(speed * 1.5, 8))
+        tx = cx + f * int(min(speed * 1.2, 7))
     else:
         tx = cx + int(math.sin(ticks * 0.0015) * 1.5)
 
-    tuft_pts = [
-        (tx - 3, hy + 3),
-        (tx,     hy - 6),
-        (tx + 3, hy + 3),
+    tuft = [
+        (tx - 3, cap_y + cap_h - 1),
+        (tx,     cap_y + cap_h - 8),
+        (tx + 3, cap_y + cap_h - 1),
     ]
-    pygame.draw.polygon(surf, OUTLINE,  [(x+1, y+1) for x, y in tuft_pts])
-    pygame.draw.polygon(surf, HAIR_MID, tuft_pts)
-    pygame.draw.polygon(surf, OUTLINE,  tuft_pts, 1)
-
-    # Cap outline on top
-    pygame.draw.arc(surf, OUTLINE,
-                    (hx - 1, hy - 1, hw + 2, hh),
-                    math.pi, 2 * math.pi, 2)
+    pygame.draw.polygon(surf, OUTLINE,  [(x+1, y+1) for x, y in tuft])
+    pygame.draw.polygon(surf, HAIR_MID, tuft)
+    pygame.draw.polygon(surf, OUTLINE,  tuft, 1)
 
 
 def _draw_eyes(surf, cx, cy, hw, hh, f, s, vx, vy, player, ticks):
     speed = abs(vx)
     le_x = cx - 5
     re_x = cx + 5
-    e_y  = cy - 1
+    e_y  = cy
 
-    ew, eh = 7, 9   # base: tall anime eye
+    ew, eh = 7, 9
 
-    # Happy squint on land
+    # Happy squint on landing
     sq = getattr(player, 'land_squash', 0)
     if sq > 3:
         for ex in (le_x, re_x):
-            pygame.draw.ellipse(surf, EYE_WHITE, (ex - 4, e_y - 2, 9, 7))
-            pygame.draw.arc(surf, OUTLINE, (ex - 4, e_y - 2, 9, 7), 0, math.pi, 2)
-        pygame.draw.arc(surf, OUTLINE, (cx - 4, e_y + 4, 8, 4), math.pi, 2 * math.pi, 2)
+            pygame.draw.ellipse(surf, EYE_WHITE, (ex - 4, e_y - 2, 9, 6))
+            pygame.draw.arc(surf, OUTLINE, (ex - 4, e_y - 2, 9, 6), 0, math.pi, 2)
+        pygame.draw.arc(surf, OUTLINE, (cx - 4, e_y + 3, 8, 4), math.pi, 2*math.pi, 2)
         _blush(surf, le_x, re_x, e_y, 6, 170)
         return
 
-    # State-based shape
     if s == "jump" and vy < -3:
         ew, eh = 7, 11
         pdx, pdy = 0, -2
@@ -311,65 +257,54 @@ def _draw_eyes(surf, cx, cy, hw, hh, f, s, vx, vy, player, ticks):
         ew, eh = 8, 8
         pdx, pdy = 0, 2
     elif speed > 5:
-        ew, eh = 9, 6   # fierce squint
+        ew, eh = 9, 6
         pdx, pdy = f * 3, 0
     elif speed > 2:
         pdx, pdy = f * 2, 0
     else:
         pdx = int(math.sin(ticks * 0.0015) * 1.5)
         pdy = 0
-        # Blink
         if (ticks // 16) % 220 < 5:
             for ex in (le_x, re_x):
-                pygame.draw.ellipse(surf, EYE_WHITE, (ex - ew // 2, e_y - 2, ew, 3))
+                pygame.draw.ellipse(surf, EYE_WHITE, (ex - ew//2, e_y - 2, ew, 3))
             return
 
     for ex in (le_x, re_x):
-        # Outline shell
         pygame.draw.ellipse(surf, OUTLINE,
-                            (ex - ew // 2 - 1, e_y - eh // 2 - 1, ew + 2, eh + 2))
-        # White
+                            (ex - ew//2 - 1, e_y - eh//2 - 1, ew + 2, eh + 2))
         pygame.draw.ellipse(surf, EYE_WHITE,
-                            (ex - ew // 2, e_y - eh // 2, ew, eh))
-        # Iris
-        ix = max(ex - ew // 2 + 2, min(ex + ew // 2 - 2, ex + pdx))
-        iy = max(e_y - eh // 2 + 2, min(e_y + eh // 2 - 2, e_y + pdy))
+                            (ex - ew//2,     e_y - eh//2,     ew,     eh))
+        ix = max(ex - ew//2 + 2, min(ex + ew//2 - 2, ex + pdx))
+        iy = max(e_y - eh//2 + 2, min(e_y + eh//2 - 2, e_y + pdy))
         pygame.draw.circle(surf, EYE_IRIS,  (ix, iy), 3)
         pygame.draw.circle(surf, EYE_PUPIL, (ix, iy), 2)
-        # Two glints — makes eyes feel alive
         pygame.draw.circle(surf, EYE_GLINT, (ix + 2, iy - 2), 2)
         pygame.draw.circle(surf, EYE_GLINT, (ix + 3, iy + 1), 1)
-        # Top lash — thick arc
+        # Top lash
         pygame.draw.arc(surf, OUTLINE,
-                        (ex - ew // 2 - 1, e_y - eh // 2 - 1, ew + 2, eh + 2),
-                        math.pi * 0.15, math.pi * 0.85, 2)
+                        (ex - ew//2 - 1, e_y - eh//2 - 1, ew + 2, eh + 2),
+                        math.pi * 0.1, math.pi * 0.9, 2)
 
-    # Brows — dark brown, expressive
+    # Eyebrows — dark brown
     brow_y = e_y - eh // 2 - 4
     if speed > 5 and s == "run":
         pygame.draw.line(surf, HAIR, (le_x - 4, brow_y - 2), (le_x + 3, brow_y), 2)
         pygame.draw.line(surf, HAIR, (re_x - 3, brow_y),     (re_x + 4, brow_y - 2), 2)
     elif s == "jump" and vy < -3:
         for ex in (le_x, re_x):
-            pygame.draw.arc(surf, HAIR,
-                            (ex - 5, brow_y - 4, 10, 6),
-                            math.pi, 2 * math.pi, 2)
+            pygame.draw.arc(surf, HAIR, (ex - 5, brow_y - 4, 10, 6), math.pi, 2*math.pi, 2)
     elif s == "fall" and vy > 5:
         for ex in (le_x, re_x):
-            pygame.draw.arc(surf, HAIR,
-                            (ex - 5, brow_y - 1, 10, 5), 0, math.pi, 2)
+            pygame.draw.arc(surf, HAIR, (ex - 5, brow_y - 1, 10, 5), 0, math.pi, 2)
     else:
-        # Neutral — slight natural arch
         for ex in (le_x, re_x):
-            pygame.draw.line(surf, HAIR,
-                             (ex - 4, brow_y), (ex + 4, brow_y - 1), 2)
+            pygame.draw.line(surf, HAIR, (ex - 4, brow_y), (ex + 4, brow_y - 1), 2)
 
     _blush(surf, le_x, re_x, e_y, 4, 50)
 
-    # Idle smile
     if abs(vx) < 1 and s not in ("jump", "fall", "roll"):
         pygame.draw.arc(surf, OUTLINE,
-                        (cx - 4, e_y + eh // 2, 8, 4), math.pi, 2 * math.pi, 1)
+                        (cx - 4, e_y + eh // 2, 8, 4), math.pi, 2*math.pi, 1)
 
 
 def _blush(surf, le_x, re_x, e_y, r, a):
@@ -387,6 +322,6 @@ def _aellipse(surf, col, x, y, w, h):
 
 
 def _acircle(surf, col, cx, cy, r):
-    s = pygame.Surface((r * 2 + 2, r * 2 + 2), pygame.SRCALPHA)
-    pygame.draw.circle(s, col, (r + 1, r + 1), r)
-    surf.blit(s, (cx - r - 1, cy - r - 1))
+    s = pygame.Surface((r*2+2, r*2+2), pygame.SRCALPHA)
+    pygame.draw.circle(s, col, (r+1, r+1), r)
+    surf.blit(s, (cx-r-1, cy-r-1))
